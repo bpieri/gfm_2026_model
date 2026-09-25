@@ -9,7 +9,8 @@ from bs4 import BeautifulSoup
 
 # ── CME Forward Curve ─────────────────────────────────────────────────────────
 
-CME_XLSX_URL = "https://rogueng.duckdns.org/cme_excel/output.xlsx"
+# CME_XLSX_URL = "https://rogueng.duckdns.org/cme_excel/output.xlsx"
+CME_XLSX_URL = "https://robotamp.pythonanywhere.com/data/new_pricing/output.xlsx"
 
 MONTH_MAP = {
     "JAN":1,"FEB":2,"MAR":3,"APR":4,"MAY":5,"JUN":6,
