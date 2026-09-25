@@ -1,0 +1,8 @@
+streamlit>=1.32
+plotly>=5.18
+pandas>=2.0
+requests>=2.31
+yfinance>=0.2.50
+fredapi>=0.5.1
+python-dotenv>=1.0
+beautifulsoup4>=4.12
