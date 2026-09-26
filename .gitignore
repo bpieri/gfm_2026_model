@@ -5,4 +5,3 @@ venv/
 .streamlit/secrets.toml
 data/*.cache
 data/*.csv
-git add data\cme_forward.xlsx -f
