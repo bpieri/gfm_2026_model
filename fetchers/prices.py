@@ -6,6 +6,7 @@ import pandas as pd
 from datetime import datetime
 from typing import Optional, Dict, List
 from bs4 import BeautifulSoup
+from pathlib import Path
 
 # ── CME Forward Curve ─────────────────────────────────────────────────────────
 
