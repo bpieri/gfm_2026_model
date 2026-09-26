@@ -10,7 +10,9 @@ from bs4 import BeautifulSoup
 # ── CME Forward Curve ─────────────────────────────────────────────────────────
 
 # CME_XLSX_URL = "https://rogueng.duckdns.org/cme_excel/output.xlsx"
-CME_XLSX_URL = "https://robotamp.pythonanywhere.com/data/new_pricing/output.xlsx"
+# CME_XLSX_URL = "https://robotamp.pythonanywhere.com/data/new_pricing/output.xlsx"
+CME_XLSX_URL   = "https://robotamp.pythonanywhere.com/data/new_pricing/output.xlsx"
+CME_LOCAL_PATH = Path("data/cme_forward.xlsx")
 
 MONTH_MAP = {
     "JAN":1,"FEB":2,"MAR":3,"APR":4,"MAY":5,"JUN":6,
@@ -34,57 +36,173 @@ def _parse_month_label(label: str) -> Optional[datetime]:
         return None
 
 
+# def fetch_cme_forward_curve() -> Dict[str, List[Dict]]:
+#     """
+#     Download CME forward curve from the hosted Excel file.
+#     Parses wti ($/bbl), ulsd ($/gal), rbob ($/gal) sheets.
+#     Uses 'settle' column as the reference price.
+#     Returns only months with a valid non-zero settle price,
+#     limited to the next 24 months for display clarity.
+#     """
+#     try:
+#         r = requests.get(CME_XLSX_URL, timeout=20)
+#         r.raise_for_status()
+#         xls = pd.read_excel(io.BytesIO(r.content), sheet_name=None)
+#     except Exception as e:
+#         print(f"  CME forward curve fetch failed: {e}")
+#         return {"wti": [], "ulsd": [], "rbob": []}
+
+#     today   = datetime.today()
+#     strips  = {}
+
+#     sheet_map = {
+#         "wti":  "wti",
+#         "ulsd": "ulsd",
+#         "rbob": "rbob",
+#     }
+
+#     for key, sheet_name in sheet_map.items():
+#         df = xls.get(sheet_name)
+#         if df is None:
+#             strips[key] = []
+#             continue
+
+#         df.columns = [str(c).strip().lower() for c in df.columns]
+#         if "month" not in df.columns or "settle" not in df.columns:
+#             strips[key] = []
+#             continue
+
+#         rows = []
+#         for _, row in df.iterrows():
+#             dt      = _parse_month_label(row["month"])
+#             settle  = row["settle"]
+#             if dt is None:
+#                 continue
+#             if dt < today.replace(day=1):
+#                 continue                          # skip expired months
+#             try:
+#                 price = float(settle)
+#             except (ValueError, TypeError):
+#                 continue
+#             if price <= 0:
+#                 continue
+
+#             rows.append({
+#                 "month":  dt.strftime("%b %Y"),
+#                 "date":   dt.strftime("%Y-%m"),
+#                 "dt":     dt,
+#                 "price":  round(price, 4),
+#                 "volume": int(row.get("volume", 0) or 0),
+#                 "oi":     int(row.get("openinterest", 0) or 0),
+#             })
+
+#         # Sort by date, keep next 24 months
+#         rows.sort(key=lambda x: x["dt"])
+#         rows = rows[:24]
+#         # Drop dt — not JSON serialisable in cache
+#         for r in rows:
+#             r.pop("dt", None)
+#         strips[key] = rows
+
+#     return strips
+
 def fetch_cme_forward_curve() -> Dict[str, List[Dict]]:
     """
-    Download CME forward curve from the hosted Excel file.
-    Parses wti ($/bbl), ulsd ($/gal), rbob ($/gal) sheets.
+    Load CME forward curve data for WTI ($/bbl), ULSD ($/gal), RBOB ($/gal).
+ 
+    Source priority:
+      1. Local file: data/cme_forward.xlsx  (committed to GitHub repo —
+         always works on Streamlit Cloud regardless of network restrictions)
+      2. Live URL fallback: robotamp.pythonanywhere.com (works locally,
+         may be blocked by some hosting environments)
+ 
+    To refresh data on the deployed app:
+      - Download fresh xlsx locally and commit to GitHub
+      - Streamlit Cloud picks it up on next redeploy
+ 
+    Parses sheets: wti, ulsd, rbob
+    Columns expected: month, open, high, low, last, change, settle, volume, openinterest
     Uses 'settle' column as the reference price.
-    Returns only months with a valid non-zero settle price,
-    limited to the next 24 months for display clarity.
+    Returns only future months with valid non-zero settle prices, max 24 months.
     """
+    raw = None
+ 
+    # ── Priority 1: local file (reliable on all platforms) ────────────────────
+    if CME_LOCAL_PATH.exists():
+        try:
+            raw = CME_LOCAL_PATH.read_bytes()
+            print(f"  CME: loaded from local file ({len(raw):,} bytes)")
+        except Exception as e:
+            print(f"  CME local file read failed: {e}")
+            raw = None
+ 
+    # ── Priority 2: live URL fetch ────────────────────────────────────────────
+    if raw is None:
+        try:
+            r = requests.get(
+                CME_XLSX_URL,
+                timeout=20,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/120.0.0.0 Safari/537.36"
+                    )
+                }
+            )
+            r.raise_for_status()
+            raw = r.content
+            print(f"  CME: fetched from URL ({len(raw):,} bytes)")
+            # Cache locally for next run
+            try:
+                CME_LOCAL_PATH.parent.mkdir(exist_ok=True)
+                CME_LOCAL_PATH.write_bytes(raw)
+                print(f"  CME: cached to {CME_LOCAL_PATH}")
+            except Exception as e:
+                print(f"  CME: local cache write failed (non-fatal): {e}")
+        except Exception as e:
+            print(f"  CME URL fetch failed: {e}")
+            return {"wti": [], "ulsd": [], "rbob": []}
+ 
+    # ── Parse the xlsx ────────────────────────────────────────────────────────
     try:
-        r = requests.get(CME_XLSX_URL, timeout=20)
-        r.raise_for_status()
-        xls = pd.read_excel(io.BytesIO(r.content), sheet_name=None)
+        xls = pd.read_excel(io.BytesIO(raw), sheet_name=None)
     except Exception as e:
-        print(f"  CME forward curve fetch failed: {e}")
+        print(f"  CME Excel parse failed: {e}")
         return {"wti": [], "ulsd": [], "rbob": []}
-
-    today   = datetime.today()
-    strips  = {}
-
-    sheet_map = {
-        "wti":  "wti",
-        "ulsd": "ulsd",
-        "rbob": "rbob",
-    }
-
-    for key, sheet_name in sheet_map.items():
-        df = xls.get(sheet_name)
+ 
+    today  = datetime.today()
+    strips = {}
+ 
+    for key in ["wti", "ulsd", "rbob"]:
+        df = xls.get(key)
         if df is None:
             strips[key] = []
             continue
-
+ 
+        # Normalise column names
         df.columns = [str(c).strip().lower() for c in df.columns]
+ 
         if "month" not in df.columns or "settle" not in df.columns:
+            print(f"  CME sheet '{key}' missing expected columns: {list(df.columns)}")
             strips[key] = []
             continue
-
+ 
         rows = []
         for _, row in df.iterrows():
-            dt      = _parse_month_label(row["month"])
-            settle  = row["settle"]
+            dt = _parse_month_label(row["month"])
             if dt is None:
                 continue
+            # Skip expired months
             if dt < today.replace(day=1):
-                continue                          # skip expired months
+                continue
             try:
-                price = float(settle)
+                price = float(row["settle"])
             except (ValueError, TypeError):
                 continue
             if price <= 0:
                 continue
-
+ 
             rows.append({
                 "month":  dt.strftime("%b %Y"),
                 "date":   dt.strftime("%Y-%m"),
@@ -93,16 +211,18 @@ def fetch_cme_forward_curve() -> Dict[str, List[Dict]]:
                 "volume": int(row.get("volume", 0) or 0),
                 "oi":     int(row.get("openinterest", 0) or 0),
             })
-
-        # Sort by date, keep next 24 months
+ 
+        # Sort ascending, keep next 24 months, drop dt (not JSON-serialisable)
         rows.sort(key=lambda x: x["dt"])
         rows = rows[:24]
-        # Drop dt — not JSON serialisable in cache
         for r in rows:
             r.pop("dt", None)
+ 
         strips[key] = rows
-
+ 
     return strips
+
+
 
 
 def compute_forward_crack(
