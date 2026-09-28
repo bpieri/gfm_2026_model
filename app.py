@@ -81,6 +81,11 @@ st.markdown("""
 [data-testid="stAppViewContainer"]>[data-testid="stVerticalBlock"]{padding-top:0 !important}
 h2{margin-top:0 !important}
 [data-testid="stSidebar"]{background:#161B22}
+p,li,span,div,label,.stMarkdown,.stText{color:#E6EDF3 !important}
+.stDataFrame{color:#E6EDF3 !important}
+[data-testid="stMetricValue"]{color:#E6EDF3 !important}
+[data-testid="stMetricLabel"]{color:#8B949E !important}
+caption,.stCaption{color:#8B949E !important}
 div[data-testid="stExpander"]{background:#161B22;border:1px solid #30363D;border-radius:8px}
 </style>
 """, unsafe_allow_html=True)
