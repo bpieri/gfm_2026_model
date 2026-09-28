@@ -48,6 +48,48 @@ def _scroll_top():
 st.set_page_config(page_title="Rogue Refinery Economics",
                    page_icon="🏭", layout="wide")
 
+# st.markdown("""
+# <style>
+# .stApp{background:#0D1117}
+# .ticker-bar{display:flex;gap:24px;background:#161B22;border:1px solid #30363D;
+#   border-radius:8px;padding:10px 20px;margin-bottom:12px;align-items:center;flex-wrap:wrap}
+# .ticker-item{display:flex;flex-direction:column;align-items:center}
+# .ticker-label{font-size:9px;color:#8B949E;letter-spacing:1px;text-transform:uppercase}
+# .ticker-value{font-size:18px;font-weight:700;color:#E6EDF3;font-family:monospace}
+# .ticker-divider{width:1px;height:32px;background:#30363D;flex-shrink:0}
+# .sec-hdr{font-size:10px;font-weight:600;color:#8B949E;letter-spacing:2px;
+#   text-transform:uppercase;margin:10px 0 6px 0}
+# .loc-card{background:#161B22;border:1px solid #30363D;border-radius:10px;
+#   padding:14px 16px;cursor:pointer}
+# .loc-card:hover{border-color:#E8A020}
+# .loc-card-name{font-size:11px;color:#8B949E;text-transform:uppercase;
+#   letter-spacing:1px;margin-bottom:4px}
+# .loc-card-spread{font-size:26px;font-weight:700;font-family:monospace}
+# .loc-card-badge{display:inline-block;font-size:9px;font-weight:600;
+#   letter-spacing:1px;padding:2px 8px;border-radius:4px;margin-top:4px}
+# .loc-card-pnl{font-size:11px;color:#8B949E;margin-top:4px}
+# .badge-strong{background:#0D2A1A;color:#3FB950}
+# .badge-moderate{background:#2A1F08;color:#E8A020}
+# .badge-thin{background:#2A0D0D;color:#F85149}
+# .metric-card{background:#161B22;border:1px solid #30363D;border-radius:8px;
+#   padding:14px;text-align:center}
+# .mc-label{font-size:9px;color:#8B949E;text-transform:uppercase;letter-spacing:1px}
+# .mc-value{font-size:20px;font-weight:700;color:#E6EDF3;font-family:monospace}
+# .mc-sub{font-size:10px;color:#8B949E;margin-top:2px}
+# #MainMenu{visibility:hidden}footer{visibility:hidden}header{visibility:hidden}
+# .block-container{padding-top:0.3rem !important;padding-bottom:0 !important}
+# [data-testid="stAppViewContainer"]>[data-testid="stVerticalBlock"]{padding-top:0 !important}
+# h2{margin-top:0 !important}
+# [data-testid="stSidebar"]{background:#161B22}
+# p,li,span,div,label,.stMarkdown,.stText{color:#E6EDF3 !important}
+# .stDataFrame{color:#E6EDF3 !important}
+# [data-testid="stMetricValue"]{color:#E6EDF3 !important}
+# [data-testid="stMetricLabel"]{color:#8B949E !important}
+# caption,.stCaption{color:#8B949E !important}
+# div[data-testid="stExpander"]{background:#161B22;border:1px solid #30363D;border-radius:8px}
+# </style>
+# """, unsafe_allow_html=True)
+
 st.markdown("""
 <style>
 .stApp{background:#0D1117}
@@ -81,12 +123,13 @@ st.markdown("""
 [data-testid="stAppViewContainer"]>[data-testid="stVerticalBlock"]{padding-top:0 !important}
 h2{margin-top:0 !important}
 [data-testid="stSidebar"]{background:#161B22}
-p,li,span,div,label,.stMarkdown,.stText{color:#E6EDF3 !important}
+div[data-testid="stExpander"]{background:#161B22;border:1px solid #30363D;border-radius:8px}
+p,.stMarkdown p,.stText{color:#E6EDF3 !important}
 .stDataFrame{color:#E6EDF3 !important}
 [data-testid="stMetricValue"]{color:#E6EDF3 !important}
 [data-testid="stMetricLabel"]{color:#8B949E !important}
 caption,.stCaption{color:#8B949E !important}
-div[data-testid="stExpander"]{background:#161B22;border:1px solid #30363D;border-radius:8px}
+label,.stSelectbox label,.stNumberInput label,.stToggle label{color:#8B949E !important}
 </style>
 """, unsafe_allow_html=True)
 
