@@ -521,9 +521,10 @@ def show_detail(live_margins, strip, sheet_prices, live_spot):
         st.warning("No data for this location.")
         return
 
-    n   = sel
-    tp  = r.get("throughput",30000)
-    spec= r.get("specialty",{})
+    n         = sel
+    tp        = r.get("throughput",30000)
+    spec      = r.get("specialty",{})
+    spec_date = r.get("spec_updated","—")
     init_fwd_state(n, loc_cfg, sheet_prices, live_spot)
     st.markdown("---")
     tab_today, tab_fwd = st.tabs(["📊 Today", "📈 Forward View"])
@@ -1552,7 +1553,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 # # app.py — Rogue Refinery Economics v6
 # # Today tab: clean 3-panel layout, no clutter
