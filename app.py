@@ -568,7 +568,8 @@ def show_detail(live_margins, strip, sheet_prices, live_spot):
             tp_today = st.number_input(
                 "Throughput (bbl/day)",
                 min_value=0, max_value=500000,
-                value=int(st.session_state[f"today_tp_{n}"]),
+                value=int(st.session_state.get(f"today_tp_{n}",
+                          r.get("throughput", 30000))),
                 step=1000, key=f"today_tp_input_{n}")
             st.session_state[f"today_tp_{n}"] = int(tp_today)
 
@@ -1551,6 +1552,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 # # app.py — Rogue Refinery Economics v6
 # # Today tab: clean 3-panel layout, no clutter
