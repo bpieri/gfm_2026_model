@@ -239,10 +239,18 @@ def init_fwd_state(n, loc_cfg, sheet_prices, live_spot):
     ulsd = live_spot.get("ulsd_gal", 3.5) or 3.5
     wti  = live_spot.get("wti_bbl",  80)  or 80
     st.session_state.update({
-        # Crude basis — auto-populated from config
-        f"fwd_crude_basis_{n}": float(loc_cfg.get("light_diff",   0.0)),
-        f"fwd_heavy_basis_{n}": float(loc_cfg.get("heavy_diff",   0.0)),
-        f"fwd_light_pct_{n}":   80.0,   # % of slate = light crude (default 80%)
+        # Crude basis — decomposed: quality diff + transport tariff from config
+        f"fwd_light_qual_{n}":    float(loc_cfg.get("light_quality_diff",    loc_cfg.get("light_diff",0.0))),
+        f"fwd_light_tariff_{n}":  float(loc_cfg.get("light_transport_tariff",2.50)),
+        f"fwd_heavy_qual_{n}":    float(loc_cfg.get("heavy_quality_diff",    loc_cfg.get("heavy_diff",0.0))),
+        f"fwd_heavy_tariff_{n}":  float(loc_cfg.get("heavy_transport_tariff",2.50)),
+        f"fwd_light_pct_{n}":     80.0,   # % of slate = light crude (default 80%)
+        # Cost transparency opex items ($/bbl) — for net margin display
+        f"ct_opex_{n}":           4.00,
+        f"ct_prod_transport_{n}": 0.50,
+        f"ct_blendstock_{n}":     1.20,
+        f"ct_rin_{n}":            0.80,
+        f"ct_maintenance_{n}":    0.75,
         # Product basis vs NYMEX
         f"fwd_gas_basis_{n}":   float(loc_cfg.get("gas_diff",     0.0)),
         f"fwd_die_basis_{n}":   float(loc_cfg.get("diesel_diff",  0.0)),
@@ -929,6 +937,9 @@ def show_detail(live_margins, strip, sheet_prices, live_spot):
                 margin=dict(l=0,r=0,t=36,b=0),height=320)
             st.plotly_chart(fig_bar, use_container_width=True)
 
+        # ── Cost Transparency Panel ───────────────────────────────────────────
+        _render_cost_transparency(n, r.get("spread_full"), tp, live_mode=True)
+
         # ── CSV download ───────────────────────────────────────────────────────
         st.markdown("---")
         dl_row = {
@@ -1000,9 +1011,11 @@ def show_detail(live_margins, strip, sheet_prices, live_spot):
             ulsd2 = live_spot.get("ulsd_gal",3.5) or 3.5
             wti2  = live_spot.get("wti_bbl",80)   or 80
             st.session_state.update({
-                f"fwd_crude_basis_{n}": float(loc_cfg.get("light_diff",0)),
-                f"fwd_heavy_basis_{n}": float(loc_cfg.get("heavy_diff",0)),
-                f"fwd_light_pct_{n}":   80.0,
+                f"fwd_light_qual_{n}":   float(loc_cfg.get("light_quality_diff",    loc_cfg.get("light_diff",0))),
+                f"fwd_light_tariff_{n}": float(loc_cfg.get("light_transport_tariff",2.50)),
+                f"fwd_heavy_qual_{n}":   float(loc_cfg.get("heavy_quality_diff",    loc_cfg.get("heavy_diff",0))),
+                f"fwd_heavy_tariff_{n}": float(loc_cfg.get("heavy_transport_tariff",2.50)),
+                f"fwd_light_pct_{n}":    80.0,
                 f"fwd_gas_basis_{n}":   float(loc_cfg.get("gas_diff",0)),
                 f"fwd_die_basis_{n}":   float(loc_cfg.get("diesel_diff",0)),
                 f"fwd_jet_{n}":         spec2.get("jet_gal",   ulsd2*1.05),
@@ -1017,69 +1030,117 @@ def show_detail(live_margins, strip, sheet_prices, live_spot):
             })
             st.rerun()
 
-        # ── SECTION A: Crude basis + slate blending — red = INPUT COSTS ────────
+        # ── SECTION A: Crude slate — fully decomposed cost inputs ───────────────
         st.markdown(
             "<div style='background:#2A0D0D;border-radius:6px;padding:6px 12px;"
             "margin-bottom:8px;font-size:10px;color:#F85149'>"
-            "🔴 CRUDE SLATE & PRODUCT BASIS — location differential vs NYMEX + "
-            "light/heavy blend determines blended crude cost per barrel"
+            "🔴 CRUDE INLET COST — quality differential + pipeline/marine tariff "
+            "= delivered cost at refinery gate · blended across light/heavy slate"
             "</div>",
             unsafe_allow_html=True)
 
-        # Row 1: Crude basis inputs + slate split
-        b1,b2,b3 = st.columns(3)
-        crude_basis = b1.number_input(
-            "Light Crude vs WTI ($/bbl)",
+        # Row 1: Light crude decomposition
+        la1,la2,la3 = st.columns(3)
+        la1.markdown("<div style='font-size:9px;color:#8B949E;text-transform:uppercase;"
+                     "letter-spacing:1px;margin-bottom:4px'>LIGHT CRUDE</div>",
+                     unsafe_allow_html=True)
+        light_qual = la1.number_input(
+            "Quality diff vs WTI ($/bbl)",
             min_value=-20.0, max_value=20.0,
-            value=float(st.session_state.get(f"fwd_crude_basis_{n}", loc_cfg.get("light_diff",0))),
-            step=0.25, format="%.2f", key=f"fp_cb_{n}")
-        st.session_state[f"fwd_crude_basis_{n}"] = crude_basis
-        eff_light_spot = round(wti_spot + crude_basis, 2)
-        b1.caption(f"Config: {loc_cfg.get('light_diff',0):+.2f} | Spot: ${eff_light_spot:.2f}/bbl")
+            value=float(st.session_state.get(f"fwd_light_qual_{n}",
+                        loc_cfg.get("light_quality_diff", loc_cfg.get("light_diff",0)))),
+            step=0.25, format="%.2f", key=f"fp_lq_{n}")
+        st.session_state[f"fwd_light_qual_{n}"] = light_qual
+        la1.caption(f"Crude grade premium/discount vs WTI light sweet")
 
-        heavy_basis = b2.number_input(
-            "Heavy Crude vs WTI ($/bbl)",
-            min_value=-20.0, max_value=20.0,
-            value=float(st.session_state.get(f"fwd_heavy_basis_{n}", loc_cfg.get("heavy_diff",0))),
-            step=0.25, format="%.2f", key=f"fp_hb_{n}")
-        st.session_state[f"fwd_heavy_basis_{n}"] = heavy_basis
-        eff_heavy_spot = round(wti_spot + heavy_basis, 2)
-        b2.caption(f"Config: {loc_cfg.get('heavy_diff',0):+.2f} | Spot: ${eff_heavy_spot:.2f}/bbl")
+        light_tariff = la2.number_input(
+            "Pipeline/marine tariff ($/bbl)",
+            min_value=0.0, max_value=20.0,
+            value=float(st.session_state.get(f"fwd_light_tariff_{n}",
+                        loc_cfg.get("light_transport_tariff", 2.50))),
+            step=0.25, format="%.2f", key=f"fp_lt_{n}")
+        st.session_state[f"fwd_light_tariff_{n}"] = light_tariff
+        la2.caption(f"Field to refinery gate · default $2.50/bbl")
 
-        light_pct = b3.number_input(
+        light_pct = la3.number_input(
             "Light crude % of slate",
             min_value=0.0, max_value=100.0,
             value=float(st.session_state.get(f"fwd_light_pct_{n}", 80.0)),
             step=5.0, format="%.0f", key=f"fp_lp_{n}")
         st.session_state[f"fwd_light_pct_{n}"] = light_pct
         heavy_pct = 100.0 - light_pct
+        light_total = round(light_qual + light_tariff, 2)
+        eff_light_spot = round(wti_spot + light_total, 2)
+        la3.caption(f"Heavy: {heavy_pct:.0f}% | Total light diff: {light_total:+.2f}/bbl")
 
-        # Compute blended crude cost — this is what goes into the crack formula
+        # Row 2: Heavy crude decomposition
+        lb1,lb2,lb3 = st.columns(3)
+        lb1.markdown("<div style='font-size:9px;color:#8B949E;text-transform:uppercase;"
+                     "letter-spacing:1px;margin-bottom:4px'>HEAVY CRUDE</div>",
+                     unsafe_allow_html=True)
+        heavy_qual = lb1.number_input(
+            "Quality diff vs WTI ($/bbl) ",
+            min_value=-20.0, max_value=20.0,
+            value=float(st.session_state.get(f"fwd_heavy_qual_{n}",
+                        loc_cfg.get("heavy_quality_diff", loc_cfg.get("heavy_diff",0)))),
+            step=0.25, format="%.2f", key=f"fp_hq_{n}")
+        st.session_state[f"fwd_heavy_qual_{n}"] = heavy_qual
+        lb1.caption(f"Heavy sour discount vs WTI")
+
+        heavy_tariff = lb2.number_input(
+            "Pipeline/marine tariff ($/bbl) ",
+            min_value=0.0, max_value=20.0,
+            value=float(st.session_state.get(f"fwd_heavy_tariff_{n}",
+                        loc_cfg.get("heavy_transport_tariff", 2.50))),
+            step=0.25, format="%.2f", key=f"fp_ht_{n}")
+        st.session_state[f"fwd_heavy_tariff_{n}"] = heavy_tariff
+        lb2.caption(f"Field to refinery gate · default $2.50/bbl")
+
+        heavy_total = round(heavy_qual + heavy_tariff, 2)
+        eff_heavy_spot = round(wti_spot + heavy_total, 2)
+        lb3.markdown(
+            f"<div style='padding-top:28px;font-size:11px;color:#8B949E'>"
+            f"Eff. spot heavy: ${eff_heavy_spot:.2f}/bbl<br>"
+            f"({heavy_pct:.0f}% of slate)</div>",
+            unsafe_allow_html=True)
+
+        # Blended crude cost — core output of slate math
         light_f = light_pct / 100.0
         heavy_f = heavy_pct / 100.0
-        blended_crude_diff = round(light_f * crude_basis + heavy_f * heavy_basis, 4)
+        blended_crude_diff = round(light_f * light_total + heavy_f * heavy_total, 4)
         blended_crude_spot = round(wti_spot + blended_crude_diff, 2)
-        b3.caption(
-            f"Heavy: {heavy_pct:.0f}% | "
-            f"Blended crude: ${blended_crude_spot:.2f}/bbl")
 
-        # Blended crude cost summary card
         st.markdown(
             f"<div style='background:#21262D;border:1px solid #F85149;"
-            f"border-radius:6px;padding:8px 14px;margin-bottom:10px;"
-            f"display:flex;gap:24px;align-items:center'>"
-            f"<div><span style='font-size:9px;color:#8B949E;text-transform:uppercase;"
-            f"letter-spacing:1px'>Blended Crude Cost (Forward)</span><br>"
-            f"<span style='font-size:20px;font-weight:700;font-family:monospace;"
-            f"color:#F85149'>${blended_crude_spot:.2f}/bbl</span></div>"
-            f"<div style='font-size:11px;color:#8B949E'>"
-            f"{light_pct:.0f}% light @ ${eff_light_spot:.2f} + "
-            f"{heavy_pct:.0f}% heavy @ ${eff_heavy_spot:.2f}<br>"
-            f"WTI {fmt_bbl(wti_spot)} + blended diff {blended_crude_diff:+.2f}/bbl"
+            f"border-radius:6px;padding:10px 16px;margin:8px 0 12px 0'>"
+            f"<div style='display:flex;gap:32px;align-items:flex-start'>"
+            f"<div>"
+            f"<div style='font-size:9px;color:#8B949E;text-transform:uppercase;"
+            f"letter-spacing:1px'>Blended Delivered Crude Cost</div>"
+            f"<div style='font-size:24px;font-weight:700;font-family:monospace;"
+            f"color:#F85149'>${blended_crude_spot:.2f}/bbl</div>"
+            f"</div>"
+            f"<div style='font-size:11px;color:#8B949E;line-height:1.8'>"
+            f"WTI spot: {fmt_bbl(wti_spot)}<br>"
+            f"+ Blended diff: {blended_crude_diff:+.2f}/bbl<br>"
+            f"= Delivered gate cost"
+            f"</div>"
+            f"<div style='font-size:11px;color:#8B949E;line-height:1.8'>"
+            f"Light ({light_pct:.0f}%): quality {light_qual:+.2f} + tariff "
+            f"+{light_tariff:.2f} = {light_total:+.2f}/bbl → ${eff_light_spot:.2f}/bbl<br>"
+            f"Heavy ({heavy_pct:.0f}%): quality {heavy_qual:+.2f} + tariff "
+            f"+{heavy_tariff:.2f} = {heavy_total:+.2f}/bbl → ${eff_heavy_spot:.2f}/bbl"
+            f"</div>"
             f"</div></div>",
             unsafe_allow_html=True)
 
-        # Row 2: Product basis
+        # Product basis
+        st.markdown(
+            "<div style='background:#0D1A2A;border-radius:6px;padding:6px 12px;"
+            "margin-bottom:8px;font-size:10px;color:#4A90D9'>"
+            "🔵 PRODUCT MARKET BASIS — location differential vs NYMEX benchmark"
+            "</div>",
+            unsafe_allow_html=True)
         b4,b5 = st.columns(2)
         gas_basis = b4.number_input(
             "Gasoline vs RBOB ($/gal)",
@@ -1087,7 +1148,7 @@ def show_detail(live_margins, strip, sheet_prices, live_spot):
             value=float(st.session_state.get(f"fwd_gas_basis_{n}", loc_cfg.get("gas_diff",0))),
             step=0.01, format="%.3f", key=f"fp_gb_{n}")
         st.session_state[f"fwd_gas_basis_{n}"] = gas_basis
-        b4.caption(f"Config: {loc_cfg.get('gas_diff',0):+.3f} | Eff. spot: ${rbob_spot+gas_basis:.3f}/gal")
+        b4.caption(f"Config: {loc_cfg.get('gas_diff',0):+.3f} | Eff. spot: ${rbob_spot+gas_basis:.3f}/gal | ${(rbob_spot+gas_basis)*42:.2f}/bbl")
 
         die_basis = b5.number_input(
             "Diesel vs ULSD ($/gal)",
@@ -1095,7 +1156,7 @@ def show_detail(live_margins, strip, sheet_prices, live_spot):
             value=float(st.session_state.get(f"fwd_die_basis_{n}", loc_cfg.get("diesel_diff",0))),
             step=0.01, format="%.3f", key=f"fp_db_{n}")
         st.session_state[f"fwd_die_basis_{n}"] = die_basis
-        b5.caption(f"Config: {loc_cfg.get('diesel_diff',0):+.3f} | Eff. spot: ${ulsd_spot+die_basis:.3f}/gal")
+        b5.caption(f"Config: {loc_cfg.get('diesel_diff',0):+.3f} | Eff. spot: ${ulsd_spot+die_basis:.3f}/gal | ${(ulsd_spot+die_basis)*42:.2f}/bbl")
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1604,7 +1665,6 @@ def main():
 if __name__ == "__main__":
     main()
 
-
 # # app.py — Rogue Refinery Economics v6
 # # Today tab: clean 3-panel layout, no clutter
 # # Forward tab: basis-driven inputs against CME curve
@@ -1849,6 +1909,7 @@ if __name__ == "__main__":
 #         # Crude basis — auto-populated from config
 #         f"fwd_crude_basis_{n}": float(loc_cfg.get("light_diff",   0.0)),
 #         f"fwd_heavy_basis_{n}": float(loc_cfg.get("heavy_diff",   0.0)),
+#         f"fwd_light_pct_{n}":   80.0,   # % of slate = light crude (default 80%)
 #         # Product basis vs NYMEX
 #         f"fwd_gas_basis_{n}":   float(loc_cfg.get("gas_diff",     0.0)),
 #         f"fwd_die_basis_{n}":   float(loc_cfg.get("diesel_diff",  0.0)),
@@ -2608,6 +2669,7 @@ if __name__ == "__main__":
 #             st.session_state.update({
 #                 f"fwd_crude_basis_{n}": float(loc_cfg.get("light_diff",0)),
 #                 f"fwd_heavy_basis_{n}": float(loc_cfg.get("heavy_diff",0)),
+#                 f"fwd_light_pct_{n}":   80.0,
 #                 f"fwd_gas_basis_{n}":   float(loc_cfg.get("gas_diff",0)),
 #                 f"fwd_die_basis_{n}":   float(loc_cfg.get("diesel_diff",0)),
 #                 f"fwd_jet_{n}":         spec2.get("jet_gal",   ulsd2*1.05),
@@ -2622,24 +2684,25 @@ if __name__ == "__main__":
 #             })
 #             st.rerun()
 
-#         # ── SECTION A: Crude & product basis — red = INPUT COSTS ─────────────
+#         # ── SECTION A: Crude basis + slate blending — red = INPUT COSTS ────────
 #         st.markdown(
 #             "<div style='background:#2A0D0D;border-radius:6px;padding:6px 12px;"
 #             "margin-bottom:8px;font-size:10px;color:#F85149'>"
-#             "🔴 CRUDE & PRODUCT BASIS — location differential vs NYMEX benchmark "
-#             "(auto-populated from config · override to model different basis)"
+#             "🔴 CRUDE SLATE & PRODUCT BASIS — location differential vs NYMEX + "
+#             "light/heavy blend determines blended crude cost per barrel"
 #             "</div>",
 #             unsafe_allow_html=True)
 
-#         b1,b2,b3,b4 = st.columns(4)
+#         # Row 1: Crude basis inputs + slate split
+#         b1,b2,b3 = st.columns(3)
 #         crude_basis = b1.number_input(
 #             "Light Crude vs WTI ($/bbl)",
 #             min_value=-20.0, max_value=20.0,
 #             value=float(st.session_state.get(f"fwd_crude_basis_{n}", loc_cfg.get("light_diff",0))),
 #             step=0.25, format="%.2f", key=f"fp_cb_{n}")
 #         st.session_state[f"fwd_crude_basis_{n}"] = crude_basis
-#         eff_crude_spot = round(wti_spot + crude_basis, 2)
-#         b1.caption(f"Config: {loc_cfg.get('light_diff',0):+.2f} | Eff. spot: ${eff_crude_spot:.2f}/bbl")
+#         eff_light_spot = round(wti_spot + crude_basis, 2)
+#         b1.caption(f"Config: {loc_cfg.get('light_diff',0):+.2f} | Spot: ${eff_light_spot:.2f}/bbl")
 
 #         heavy_basis = b2.number_input(
 #             "Heavy Crude vs WTI ($/bbl)",
@@ -2647,23 +2710,59 @@ if __name__ == "__main__":
 #             value=float(st.session_state.get(f"fwd_heavy_basis_{n}", loc_cfg.get("heavy_diff",0))),
 #             step=0.25, format="%.2f", key=f"fp_hb_{n}")
 #         st.session_state[f"fwd_heavy_basis_{n}"] = heavy_basis
-#         b2.caption(f"Config: {loc_cfg.get('heavy_diff',0):+.2f} | Eff. spot: ${wti_spot+heavy_basis:.2f}/bbl")
+#         eff_heavy_spot = round(wti_spot + heavy_basis, 2)
+#         b2.caption(f"Config: {loc_cfg.get('heavy_diff',0):+.2f} | Spot: ${eff_heavy_spot:.2f}/bbl")
 
-#         gas_basis = b3.number_input(
+#         light_pct = b3.number_input(
+#             "Light crude % of slate",
+#             min_value=0.0, max_value=100.0,
+#             value=float(st.session_state.get(f"fwd_light_pct_{n}", 80.0)),
+#             step=5.0, format="%.0f", key=f"fp_lp_{n}")
+#         st.session_state[f"fwd_light_pct_{n}"] = light_pct
+#         heavy_pct = 100.0 - light_pct
+
+#         # Compute blended crude cost — this is what goes into the crack formula
+#         light_f = light_pct / 100.0
+#         heavy_f = heavy_pct / 100.0
+#         blended_crude_diff = round(light_f * crude_basis + heavy_f * heavy_basis, 4)
+#         blended_crude_spot = round(wti_spot + blended_crude_diff, 2)
+#         b3.caption(
+#             f"Heavy: {heavy_pct:.0f}% | "
+#             f"Blended crude: ${blended_crude_spot:.2f}/bbl")
+
+#         # Blended crude cost summary card
+#         st.markdown(
+#             f"<div style='background:#21262D;border:1px solid #F85149;"
+#             f"border-radius:6px;padding:8px 14px;margin-bottom:10px;"
+#             f"display:flex;gap:24px;align-items:center'>"
+#             f"<div><span style='font-size:9px;color:#8B949E;text-transform:uppercase;"
+#             f"letter-spacing:1px'>Blended Crude Cost (Forward)</span><br>"
+#             f"<span style='font-size:20px;font-weight:700;font-family:monospace;"
+#             f"color:#F85149'>${blended_crude_spot:.2f}/bbl</span></div>"
+#             f"<div style='font-size:11px;color:#8B949E'>"
+#             f"{light_pct:.0f}% light @ ${eff_light_spot:.2f} + "
+#             f"{heavy_pct:.0f}% heavy @ ${eff_heavy_spot:.2f}<br>"
+#             f"WTI {fmt_bbl(wti_spot)} + blended diff {blended_crude_diff:+.2f}/bbl"
+#             f"</div></div>",
+#             unsafe_allow_html=True)
+
+#         # Row 2: Product basis
+#         b4,b5 = st.columns(2)
+#         gas_basis = b4.number_input(
 #             "Gasoline vs RBOB ($/gal)",
 #             min_value=-1.0, max_value=1.0,
 #             value=float(st.session_state.get(f"fwd_gas_basis_{n}", loc_cfg.get("gas_diff",0))),
 #             step=0.01, format="%.3f", key=f"fp_gb_{n}")
 #         st.session_state[f"fwd_gas_basis_{n}"] = gas_basis
-#         b3.caption(f"Config: {loc_cfg.get('gas_diff',0):+.3f} | Eff. spot: ${rbob_spot+gas_basis:.3f}/gal")
+#         b4.caption(f"Config: {loc_cfg.get('gas_diff',0):+.3f} | Eff. spot: ${rbob_spot+gas_basis:.3f}/gal")
 
-#         die_basis = b4.number_input(
+#         die_basis = b5.number_input(
 #             "Diesel vs ULSD ($/gal)",
 #             min_value=-1.0, max_value=1.0,
 #             value=float(st.session_state.get(f"fwd_die_basis_{n}", loc_cfg.get("diesel_diff",0))),
 #             step=0.01, format="%.3f", key=f"fp_db_{n}")
 #         st.session_state[f"fwd_die_basis_{n}"] = die_basis
-#         b4.caption(f"Config: {loc_cfg.get('diesel_diff',0):+.3f} | Eff. spot: ${ulsd_spot+die_basis:.3f}/gal")
+#         b5.caption(f"Config: {loc_cfg.get('diesel_diff',0):+.3f} | Eff. spot: ${ulsd_spot+die_basis:.3f}/gal")
 
 #         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -2765,9 +2864,10 @@ if __name__ == "__main__":
 #         st.markdown("<br>", unsafe_allow_html=True)
 
 #         # ── Compute forward curve ─────────────────────────────────────────────
+#         # Use blended crude diff (light% × light_basis + heavy% × heavy_basis)
 #         loc_fwd = compute_forward_crack(
 #             strip=strip,
-#             crude_diff=crude_basis, gas_diff=gas_basis,
+#             crude_diff=blended_crude_diff, gas_diff=gas_basis,
 #             diesel_diff=die_basis,
 #             jet_fwd=eff_jet, bunker_fwd=eff_bunker,
 #             asphalt_fwd=eff_asphalt, lpg_fwd=eff_lpg,
@@ -2847,8 +2947,10 @@ if __name__ == "__main__":
 #                     mode="none", fill="tonexty",
 #                     fillcolor=AREA_COLORS[name],
 #                     stackgroup="one", line=dict(width=0)))
+#             # Adjust wti_fwd by blended diff for chart display
+#             wti_blend_fwd = [round(v+blended_crude_diff,2) for v in wti_fwd]
 #             fig_fwd.add_trace(go.Scatter(
-#                 x=months, y=wti_fwd, name="Crude Cost (WTI+basis)",
+#                 x=months, y=wti_blend_fwd, name="Blended Crude Cost",
 #                 line=dict(color="#FFFFFF", width=2.5), mode="lines"))
 #             fig_fwd.add_trace(go.Scatter(
 #                 x=months, y=crack_vals, name="3-2-1 Crack ($/bbl)",
@@ -2869,7 +2971,7 @@ if __name__ == "__main__":
 #             if months and wti_fwd:
 #                 fig_fwd.add_annotation(
 #                     x=months[len(months)//2],
-#                     y=wti_fwd[len(wti_fwd)//2]+5,
+#                     y=wti_blend_fwd[len(wti_blend_fwd)//2]+5,
 #                     text="↑ Gap = Margin", showarrow=False,
 #                     font=dict(color="#FFFFFF", size=10),
 #                     bgcolor="rgba(0,0,0,0.5)")
@@ -2887,14 +2989,14 @@ if __name__ == "__main__":
 #             if fov:
 #                 fwd_dn = compute_forward_crack(
 #                     strip=strip,
-#                     crude_diff=crude_basis+(wti_fwd[0]*0.20 if wti_fwd else 0),
+#                     crude_diff=blended_crude_diff+(wti_fwd[0]*0.20 if wti_fwd else 0),
 #                     gas_diff=gas_basis-0.20, diesel_diff=die_basis-0.20,
 #                     jet_fwd=eff_jet*0.80, bunker_fwd=eff_bunker*0.80,
 #                     asphalt_fwd=eff_asphalt*0.80, lpg_fwd=eff_lpg*0.80,
 #                     yields=fwd_yields)
 #                 fwd_up = compute_forward_crack(
 #                     strip=strip,
-#                     crude_diff=crude_basis-(wti_fwd[0]*0.20 if wti_fwd else 0),
+#                     crude_diff=blended_crude_diff-(wti_fwd[0]*0.20 if wti_fwd else 0),
 #                     gas_diff=gas_basis+0.20, diesel_diff=die_basis+0.20,
 #                     jet_fwd=eff_jet*1.20, bunker_fwd=eff_bunker*1.20,
 #                     asphalt_fwd=eff_asphalt*1.20, lpg_fwd=eff_lpg*1.20,
@@ -2986,10 +3088,18 @@ if __name__ == "__main__":
 #             f_ref_bbl  = round(fwd_tp * y_ru2)
 #             f_asp_tons = round(f_asp_bbl / 6.3, 1)
 
+#             f_light_bbl = round(fwd_tp * light_f)
+#             f_heavy_bbl = round(fwd_tp * heavy_f)
 #             fwd_ops_rows = [
-#                 ("Light Crude",  "🔴 INPUT (cost)",   fwd_tp,    f"{fwd_tp*42:,.0f}",
-#                  f"{fwd_tp*30:,.0f}",  f"CME WTI+{crude_basis:+.2f}/bbl",
-#                  f"${eff_crude_spot:.2f}/bbl effective"),
+#                 ("Light Crude",  "🔴 INPUT (cost)",   f_light_bbl, f"{f_light_bbl*42:,.0f}",
+#                  f"{f_light_bbl*30:,.0f}", f"WTI+{crude_basis:+.2f} = ${eff_light_spot:.2f}/bbl",
+#                  f"{light_pct:.0f}% of slate"),
+#                 ("Heavy Crude",  "🔴 INPUT (cost)",   f_heavy_bbl, f"{f_heavy_bbl*42:,.0f}",
+#                  f"{f_heavy_bbl*30:,.0f}", f"WTI+{heavy_basis:+.2f} = ${eff_heavy_spot:.2f}/bbl",
+#                  f"{heavy_pct:.0f}% of slate"),
+#                 ("Blended Crude","🔴 TOTAL INPUT",    fwd_tp,      f"{fwd_tp*42:,.0f}",
+#                  f"{fwd_tp*30:,.0f}", f"Blended = ${blended_crude_spot:.2f}/bbl",
+#                  f"Weighted avg of slate"),
 #                 ("Gasoline",     "🟢 OUTPUT (rev)",   f_gas_bbl, f"{f_gas_bbl*42:,.0f}",
 #                  f"{f_gas_bbl*30:,.0f}",f"CME RBOB+{gas_basis:+.3f}/gal",
 #                  f"Strip-driven price"),
@@ -3028,7 +3138,7 @@ if __name__ == "__main__":
 #             # Full forward GRM table + download
 #             fwd_df = pd.DataFrame({
 #                 "Month":               months,
-#                 "WTI+Basis ($/bbl)":   [round(v+crude_basis, 2) for v in wti_fwd],
+#                 "WTI+Blend ($/bbl)":   [round(v+blended_crude_diff, 2) for v in wti_fwd],
 #                 "RBOB+Basis ($/gal)":  [round(v+gas_basis,   3) for v in rbob_f],
 #                 "ULSD+Basis ($/gal)":  [round(v+die_basis,   3) for v in ulsd_f],
 #                 "Jet Fwd ($/gal)":     [eff_jet]     * len(months),
