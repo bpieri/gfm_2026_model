@@ -1729,72 +1729,7 @@ Opex ($3–8/bbl) · RINs · Blendstock costs · Pipeline tariffs · Carbon · H
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
-def main():
-    check_password()
 
-    st.markdown(
-        "<h2 style='color:#E6EDF3;margin-bottom:2px;margin-top:-8px'>"
-        "🏭 Rogue Refinery Economics</h2>"
-        "<p style='color:#8B949E;margin-bottom:10px;font-size:12px'>"
-        "Portfolio intelligence · CME forward curves · Gross Refining Margin</p>",
-        unsafe_allow_html=True)
-
-    with st.sidebar:
-        st.markdown(
-            "<div style='text-align:center;padding:10px 0'>"
-            "<span style='font-size:26px'>🏭</span><br>"
-            "<span style='color:#E8A020;font-weight:700;font-size:13px;"
-            "letter-spacing:2px'>ROGUE REFINERY</span><br>"
-            "<span style='color:#8B949E;font-size:10px;letter-spacing:1px'>"
-            "ECONOMICS DASHBOARD</span></div>",
-            unsafe_allow_html=True)
-        st.markdown("---")
-        if st.button("📋 Management Report", use_container_width=True):
-            st.session_state["view"] = "report"
-            st.rerun()
-        if st.button("🔄 Refresh All Data", use_container_width=True):
-            get_cme.clear(); get_spot.clear()
-            get_lp.clear();  get_spec.clear()
-            get_specialty_sheet.clear()
-            auth = st.session_state.get("auth")
-            for k in list(st.session_state.keys()):
-                del st.session_state[k]
-            if auth: st.session_state["auth"] = auth
-            st.rerun()
-        st.markdown("---")
-        st.caption(
-            "**Today:** live prices — read only.\n\n"
-            "**Forward:** CME strip + location basis.\n\n"
-            "Specialty prices (jet/bunker/asphalt/LPG) updated "
-            "weekly via Google Sheet.")
-
-    with st.spinner("Loading market data..."):
-        strip        = get_cme()
-        lp           = get_lp()
-        sheet_prices = get_specialty_sheet()
-        live_spot    = get_spot()
-
-    live_margins, _, _ = build_live_margins(lp, sheet_prices)
-    render_ticker(live_spot, live_margins)
-
-    view = st.session_state.get("view","portfolio")
-    if view == "portfolio":
-        show_portfolio(live_margins)
-        show_methodology()
-    elif view == "report":
-        show_management_report(live_margins, strip, sheet_prices, live_spot)
-    else:
-        show_detail(live_margins, strip, sheet_prices, live_spot)
-
-    st.markdown(
-        f"<div style='color:#484F58;font-size:10px;text-align:right;margin-top:8px'>"
-        f"AAA Fuel Gauge · EIA API · CME local xlsx · Google Sheet · "
-        f"{datetime.now().strftime('%Y-%m-%d %H:%M')} UTC</div>",
-        unsafe_allow_html=True)
-
-
-if __name__ == "__main__":
-    main()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2225,6 +2160,74 @@ def show_management_report(live_margins, strip, sheet_prices, live_spot):
         f"</div>",
         unsafe_allow_html=True)
 
+
+
+def main():
+    check_password()
+
+    st.markdown(
+        "<h2 style='color:#E6EDF3;margin-bottom:2px;margin-top:-8px'>"
+        "🏭 Rogue Refinery Economics</h2>"
+        "<p style='color:#8B949E;margin-bottom:10px;font-size:12px'>"
+        "Portfolio intelligence · CME forward curves · Gross Refining Margin</p>",
+        unsafe_allow_html=True)
+
+    with st.sidebar:
+        st.markdown(
+            "<div style='text-align:center;padding:10px 0'>"
+            "<span style='font-size:26px'>🏭</span><br>"
+            "<span style='color:#E8A020;font-weight:700;font-size:13px;"
+            "letter-spacing:2px'>ROGUE REFINERY</span><br>"
+            "<span style='color:#8B949E;font-size:10px;letter-spacing:1px'>"
+            "ECONOMICS DASHBOARD</span></div>",
+            unsafe_allow_html=True)
+        st.markdown("---")
+        if st.button("📋 Management Report", use_container_width=True):
+            st.session_state["view"] = "report"
+            st.rerun()
+        if st.button("🔄 Refresh All Data", use_container_width=True):
+            get_cme.clear(); get_spot.clear()
+            get_lp.clear();  get_spec.clear()
+            get_specialty_sheet.clear()
+            auth = st.session_state.get("auth")
+            for k in list(st.session_state.keys()):
+                del st.session_state[k]
+            if auth: st.session_state["auth"] = auth
+            st.rerun()
+        st.markdown("---")
+        st.caption(
+            "**Today:** live prices — read only.\n\n"
+            "**Forward:** CME strip + location basis.\n\n"
+            "Specialty prices (jet/bunker/asphalt/LPG) updated "
+            "weekly via Google Sheet.")
+
+    with st.spinner("Loading market data..."):
+        strip        = get_cme()
+        lp           = get_lp()
+        sheet_prices = get_specialty_sheet()
+        live_spot    = get_spot()
+
+    live_margins, _, _ = build_live_margins(lp, sheet_prices)
+    render_ticker(live_spot, live_margins)
+
+    view = st.session_state.get("view","portfolio")
+    if view == "portfolio":
+        show_portfolio(live_margins)
+        show_methodology()
+    elif view == "report":
+        show_management_report(live_margins, strip, sheet_prices, live_spot)
+    else:
+        show_detail(live_margins, strip, sheet_prices, live_spot)
+
+    st.markdown(
+        f"<div style='color:#484F58;font-size:10px;text-align:right;margin-top:8px'>"
+        f"AAA Fuel Gauge · EIA API · CME local xlsx · Google Sheet · "
+        f"{datetime.now().strftime('%Y-%m-%d %H:%M')} UTC</div>",
+        unsafe_allow_html=True)
+
+
+if __name__ == "__main__":
+    main()
 
 
 # # app.py — Rogue Refinery Economics v6
