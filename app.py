@@ -471,6 +471,13 @@ def show_portfolio(live_margins):
         </div>""", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
+    # Report button
+    rp1, rp2 = st.columns([3,1])
+    with rp2:
+        if st.button("📋 Management Report", use_container_width=True):
+            st.session_state["view"] = "report"
+            st.rerun()
+
     # Map
     st.markdown("<div class='sec-hdr'>Portfolio Map — 3-2-1 Crack Spread</div>",
                 unsafe_allow_html=True)
@@ -1742,6 +1749,9 @@ def main():
             "ECONOMICS DASHBOARD</span></div>",
             unsafe_allow_html=True)
         st.markdown("---")
+        if st.button("📋 Management Report", use_container_width=True):
+            st.session_state["view"] = "report"
+            st.rerun()
         if st.button("🔄 Refresh All Data", use_container_width=True):
             get_cme.clear(); get_spot.clear()
             get_lp.clear();  get_spec.clear()
@@ -1771,6 +1781,8 @@ def main():
     if view == "portfolio":
         show_portfolio(live_margins)
         show_methodology()
+    elif view == "report":
+        show_management_report(live_margins, strip, sheet_prices, live_spot)
     else:
         show_detail(live_margins, strip, sheet_prices, live_spot)
 
@@ -1785,6 +1797,433 @@ if __name__ == "__main__":
     main()
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# MANAGEMENT REPORT
+# ══════════════════════════════════════════════════════════════════════════════
+def _fwd_averages(strip, loc_cfg, n, sheet_prices, live_spot):
+    """
+    Compute forward crack averages for a location using session state
+    basis values if set, otherwise config defaults.
+    Returns dict with keys: months_3, months_6, months_12, months_24
+    Each value: {crack_321, crack_full, net_margin, grm_mm}
+    """
+    # Pull basis from session state (user may have tuned in dashboard)
+    # Fall back to config defaults if not set
+    light_qual    = st.session_state.get(f"fwd_light_qual_{n}",
+                    loc_cfg.get("light_quality_diff",    loc_cfg.get("light_diff",0)))
+    light_tariff  = st.session_state.get(f"fwd_light_tariff_{n}",
+                    loc_cfg.get("light_transport_tariff", 2.50))
+    heavy_qual    = st.session_state.get(f"fwd_heavy_qual_{n}",
+                    loc_cfg.get("heavy_quality_diff",    loc_cfg.get("heavy_diff",0)))
+    heavy_tariff  = st.session_state.get(f"fwd_heavy_tariff_{n}",
+                    loc_cfg.get("heavy_transport_tariff", 2.50))
+    light_pct     = st.session_state.get(f"fwd_light_pct_{n}", 80.0)
+    light_f       = light_pct / 100.0
+    heavy_f       = 1.0 - light_f
+    light_total   = light_qual + light_tariff
+    heavy_total   = heavy_qual + heavy_tariff
+    blended_diff  = round(light_f * light_total + heavy_f * heavy_total, 4)
+
+    gas_basis     = st.session_state.get(f"fwd_gas_basis_{n}",  loc_cfg.get("gas_diff",0))
+    die_basis     = st.session_state.get(f"fwd_die_basis_{n}",  loc_cfg.get("diesel_diff",0))
+
+    spec          = sheet_prices.get(n, {})
+    ulsd          = live_spot.get("ulsd_gal",3.5) or 3.5
+    wti           = live_spot.get("wti_bbl",80)   or 80
+
+    jet_base      = st.session_state.get(f"fwd_jet_{n}",     spec.get("jet_gal",    ulsd*1.05))
+    jet_delta     = st.session_state.get(f"fwd_jet_delta_{n}", 0.0)
+    bnk_base      = st.session_state.get(f"fwd_bunker_{n}",  spec.get("bunker_gal", ulsd*0.70))
+    bnk_delta     = st.session_state.get(f"fwd_bunker_delta_{n}", 0.0)
+    asp_base      = st.session_state.get(f"fwd_asphalt_{n}", spec.get("asphalt_gal",ulsd*0.60))
+    asp_delta     = st.session_state.get(f"fwd_asphalt_delta_{n}", 0.0)
+    lpg_base      = st.session_state.get(f"fwd_lpg_{n}",     spec.get("lpg_gal",round(wti*0.50/42,3)))
+    lpg_delta     = st.session_state.get(f"fwd_lpg_delta_{n}", 0.0)
+
+    eff_jet       = jet_base + jet_delta
+    eff_bunker    = bnk_base + bnk_delta
+    eff_asphalt   = asp_base + asp_delta
+    eff_lpg       = lpg_base + lpg_delta
+
+    fwd_yields    = {k: round(st.session_state.get(f"fwd_y_{k}_{n}",
+                    YIELD_DEFAULTS.get(k,0)*100)/100, 6)
+                    for k in YIELD_DEFAULTS}
+
+    tp            = int(st.session_state.get(f"fwd_tp_{n}", loc_cfg.get("throughput",30000)))
+
+    # Opex deductions from session state
+    total_deductions = sum(
+        float(st.session_state.get(k, d)) for k,d in [
+            (f"ct_opex_{n}",           4.00),
+            (f"ct_prod_transport_{n}",  0.50),
+            (f"ct_blendstock_{n}",      1.20),
+            (f"ct_rin_{n}",             0.80),
+            (f"ct_maintenance_{n}",     0.75),
+        ]
+    )
+
+    loc_fwd = compute_forward_crack(
+        strip=strip, crude_diff=blended_diff,
+        gas_diff=gas_basis, diesel_diff=die_basis,
+        jet_fwd=eff_jet, bunker_fwd=eff_bunker,
+        asphalt_fwd=eff_asphalt, lpg_fwd=eff_lpg,
+        yields=fwd_yields)
+
+    if not loc_fwd:
+        return None
+
+    valid = [r for r in loc_fwd if r.get("crack_321") is not None]
+    if not valid:
+        return None
+
+    def _avg(rows, field):
+        vals = [r.get(field) for r in rows if r.get(field) is not None]
+        return round(sum(vals)/len(vals), 2) if vals else None
+
+    def _period(rows):
+        c321  = _avg(rows, "crack_321")
+        cfull = _avg(rows, "crack_full")
+        net   = round(cfull - total_deductions, 2) if cfull else None
+        grm_mm= round(cfull * tp * 30 / 1e6, 2)  if cfull else None
+        net_mm= round(net   * tp * 30 / 1e6, 2)  if net   else None
+        return {"crack_321": c321, "crack_full": cfull,
+                "net": net, "grm_mm": grm_mm, "net_mm": net_mm}
+
+    return {
+        "3mo":  _period(valid[:3]),
+        "6mo":  _period(valid[:6]),
+        "12mo": _period(valid[:12]),
+        "24mo": _period(valid[:24]),
+        "monthly": valid,
+        "deductions": total_deductions,
+        "tp": tp,
+    }
+
+
+def show_management_report(live_margins, strip, sheet_prices, live_spot):
+    """
+    Management Report — scrolling one-card-per-location view.
+    Read-only. Uses live data for Today, session state basis for Forward.
+    """
+    # ── Header ────────────────────────────────────────────────────────────────
+    rpt_top, rpt_back = st.columns([5,1])
+    with rpt_back:
+        if st.button("← Dashboard", use_container_width=True):
+            st.session_state["view"] = "portfolio"
+            st.rerun()
+    with rpt_top:
+        st.markdown(
+            f"<h3 style='color:#E6EDF3;margin:0'>📋 Management Report</h3>"
+            f"<p style='color:#8B949E;font-size:11px;margin:2px 0 10px 0'>"
+            f"All locations · Live market prices · "
+            f"{datetime.now().strftime('%B %d, %Y %H:%M')} UTC</p>",
+            unsafe_allow_html=True)
+
+    # ── Portfolio summary table ───────────────────────────────────────────────
+    st.markdown("<div class='sec-hdr'>Portfolio Summary</div>",
+                unsafe_allow_html=True)
+
+    summary_rows = []
+    for r in live_margins:
+        n   = r["display"]
+        loc = next((l for l in LOCATIONS if l["display"]==n), {})
+        tp  = r.get("throughput",30000)
+        sfull = r.get("spread_full")
+        deductions = sum(
+            float(st.session_state.get(k, d)) for k,d in [
+                (f"ct_opex_{n}",4.00),(f"ct_prod_transport_{n}",0.50),
+                (f"ct_blendstock_{n}",1.20),(f"ct_rin_{n}",0.80),
+                (f"ct_maintenance_{n}",0.75),
+            ])
+        net = round(sfull - deductions, 2) if sfull else None
+        grm_mm = fmt_grm(sfull, tp)
+        net_mm = round(net * tp * 30 / 1e6, 2) if net else None
+
+        fwd = _fwd_averages(strip, loc, n, sheet_prices, live_spot)
+        f12 = fwd["12mo"]["crack_full"] if fwd else None
+
+        summary_rows.append({
+            "Location":             n.split("—")[-1].split(",")[0].strip(),
+            "Today GRM ($/bbl)":    f"${sfull:.2f}" if sfull else "—",
+            "Est. Net ($/bbl)":     f"${net:.2f}"   if net   else "—",
+            "GRM/mo ($MM)":         f"${grm_mm:.1f}MM" if grm_mm else "—",
+            "12mo Fwd Full Yield":  f"${f12:.2f}"   if f12   else "—",
+            "Status":               spread_label(sfull),
+        })
+
+    st.dataframe(pd.DataFrame(summary_rows), use_container_width=True,
+                 hide_index=True)
+
+    st.markdown("---")
+
+    # ── One card per location ─────────────────────────────────────────────────
+    for r in live_margins:
+        n   = r["display"]
+        loc = next((l for l in LOCATIONS if l["display"]==n), {})
+        tp  = r.get("throughput",30000)
+        spec= r.get("specialty",{})
+
+        s321  = r.get("spread_321")
+        sfull = r.get("spread_full")
+        s211  = r.get("spread_211")
+        s532  = r.get("spread_532")
+        cr_   = r.get("crude_light",0) or 0
+        ws_g  = r.get("wholesale_gas",0) or 0
+        ws_d  = r.get("wholesale_diesel",0) or 0
+        jet_p = spec.get("jet_gal",    SPECIALTY_DEFAULTS["jet_gal"])
+        bnk_p = spec.get("bunker_gal", SPECIALTY_DEFAULTS["bunker_gal"])
+        asp_p = spec.get("asphalt_gal",SPECIALTY_DEFAULTS["asphalt_gal"])
+        lpg_p = spec.get("lpg_gal",    SPECIALTY_DEFAULTS.get("lpg_gal",0.95))
+
+        yields = {k: v for k, v in YIELD_DEFAULTS.items()}
+        y_g = yields.get("gasoline",0.445);  y_d = yields.get("ulsd",0.290)
+        y_j = yields.get("jet",0.110);       y_b = yields.get("bunker",0.035)
+        y_a = yields.get("asphalt",0.025);   y_l = yields.get("lpg_other",0.040)
+        _sal = y_g+y_d+y_j+y_b+y_a+y_l
+
+        gc_=round(ws_g*y_g*42,2); dc_=round(ws_d*y_d*42,2)
+        jc_=round(jet_p*y_j*42,2);bc_=round(bnk_p*y_b*42,2)
+        ac_=round(asp_p*y_a*42,2);lc_=round(lpg_p*y_l*42,2)
+        total_rev = gc_+dc_+jc_+bc_+ac_+lc_
+        grm_full  = round(total_rev - cr_, 2)
+        pnl_v     = fmt_grm(s321, tp)
+
+        # Opex deductions
+        opex_items = [
+            ("Refinery Opex",        f"ct_opex_{n}",           4.00),
+            ("Product Transport",    f"ct_prod_transport_{n}",  0.50),
+            ("Blendstock Costs",     f"ct_blendstock_{n}",      1.20),
+            ("RIN Obligations",      f"ct_rin_{n}",             0.80),
+            ("Maintenance & T/A",    f"ct_maintenance_{n}",     0.75),
+        ]
+        total_ded = sum(float(st.session_state.get(k,d)) for _,k,d in opex_items)
+        net_margin= round(grm_full - total_ded, 2) if grm_full else None
+        net_mm    = round(net_margin * tp * 30 / 1e6, 2) if net_margin else None
+
+        # Forward averages
+        fwd = _fwd_averages(strip, loc, n, sheet_prices, live_spot)
+
+        clr = spread_color(sfull)
+        short = n.split("—")[-1].split(",")[0].strip()
+
+        # ── Location header ───────────────────────────────────────────────────
+        st.markdown(
+            f"<div style='background:#161B22;border:1px solid {clr};"
+            f"border-radius:10px;padding:16px 20px;margin-bottom:12px'>"
+            f"<div style='display:flex;justify-content:space-between;"
+            f"align-items:center;flex-wrap:wrap;gap:12px'>"
+            f"<div>"
+            f"<div style='font-size:11px;color:#8B949E;text-transform:uppercase;"
+            f"letter-spacing:2px;margin-bottom:4px'>{n}</div>"
+            f"<div style='font-size:36px;font-weight:700;font-family:monospace;"
+            f"color:{clr};line-height:1'>{'$'+str(grm_full)+'/bbl' if grm_full else '—'}</div>"
+            f"<div style='font-size:12px;color:{clr};letter-spacing:1px;margin-top:2px'>"
+            f"FULL YIELD GRM · {spread_label(grm_full)}</div>"
+            f"</div>"
+            f"<div style='display:flex;gap:20px;flex-wrap:wrap'>"
+            f"<div style='text-align:center'>"
+            f"<div style='font-size:9px;color:#8B949E;text-transform:uppercase;letter-spacing:1px'>3-2-1 Ref</div>"
+            f"<div style='font-size:20px;font-weight:700;font-family:monospace;color:{spread_color(s321)}'>"
+            f"{'$'+str(s321) if s321 else '—'}</div></div>"
+            f"<div style='text-align:center'>"
+            f"<div style='font-size:9px;color:#8B949E;text-transform:uppercase;letter-spacing:1px'>Est. Net</div>"
+            f"<div style='font-size:20px;font-weight:700;font-family:monospace;"
+            f"color:{spread_color(net_margin)}'>"
+            f"{'$'+str(net_margin)+'/bbl' if net_margin else '—'}</div></div>"
+            f"<div style='text-align:center'>"
+            f"<div style='font-size:9px;color:#8B949E;text-transform:uppercase;letter-spacing:1px'>GRM/mo</div>"
+            f"<div style='font-size:20px;font-weight:700;font-family:monospace;color:#3FB950'>"
+            f"{'$'+str(pnl_v)+'MM' if pnl_v else '—'}</div></div>"
+            f"<div style='text-align:center'>"
+            f"<div style='font-size:9px;color:#8B949E;text-transform:uppercase;letter-spacing:1px'>Net/mo</div>"
+            f"<div style='font-size:20px;font-weight:700;font-family:monospace;"
+            f"color:{spread_color(net_margin)}'>"
+            f"{'$'+str(net_mm)+'MM' if net_mm else '—'}</div></div>"
+            f"</div></div></div>",
+            unsafe_allow_html=True)
+
+        col_left, col_right = st.columns([1,1], gap="large")
+
+        with col_left:
+            # ── Revenue breakdown horizontal bar ──────────────────────────────
+            st.markdown("<div class='sec-hdr'>Revenue Contribution by Product</div>",
+                        unsafe_allow_html=True)
+            PROD_DATA = [
+                ("Gasoline", gc_, "#4A90D9"),
+                ("Diesel",   dc_, "#E8A020"),
+                ("Jet Fuel", jc_, "#5A9E3A"),
+                ("Bunker",   bc_, "#8B4FBF"),
+                ("Asphalt",  ac_, "#CC7722"),
+                ("LPG/Other",lc_, "#3AA6B9"),
+            ]
+            bar_html = "<div style='margin-top:4px'>"
+            for prod, val, clr2 in PROD_DATA:
+                pct = round(val/total_rev*100,1) if total_rev else 0
+                w   = max(pct, 2)
+                bar_html += (
+                    f"<div style='display:flex;align-items:center;margin-bottom:5px;gap:8px'>"
+                    f"<div style='width:80px;font-size:10px;color:#8B949E;text-align:right'>{prod}</div>"
+                    f"<div style='flex:1;background:#21262D;border-radius:3px;height:18px'>"
+                    f"<div style='width:{w}%;background:{clr2};border-radius:3px;height:18px;"
+                    f"display:flex;align-items:center;padding-left:6px'>"
+                    f"<span style='font-size:10px;font-weight:600;color:#E6EDF3'>{pct}%</span>"
+                    f"</div></div>"
+                    f"<div style='width:60px;font-size:10px;color:#E6EDF3;font-family:monospace'>"
+                    f"${val:.1f}</div>"
+                    f"</div>"
+                )
+            bar_html += "</div>"
+            st.markdown(bar_html, unsafe_allow_html=True)
+            st.caption("$/bbl contribution · % of total product revenue")
+
+            # ── GRM → Net waterfall table ─────────────────────────────────────
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("<div class='sec-hdr'>Gross → Net Margin Waterfall</div>",
+                        unsafe_allow_html=True)
+            wf_rows = [("Gross Refining Margin", grm_full, "#E8A020", True)]
+            running = grm_full or 0
+            for label, key, default in opex_items:
+                val = float(st.session_state.get(key, default))
+                running = round(running - val, 2)
+                wf_rows.append((f"  − {label}", -val, "#F85149", False))
+            wf_rows.append(("Est. Net Margin", net_margin, spread_color(net_margin), True))
+
+            wf_html = "<div style='font-family:monospace;font-size:12px'>"
+            for label, val, clr2, is_total in wf_rows:
+                weight = "700" if is_total else "400"
+                border = f"border-top:1px solid #30363D;margin-top:4px;padding-top:4px" if is_total else ""
+                wf_html += (
+                    f"<div style='display:flex;justify-content:space-between;"
+                    f"padding:3px 0;{border}'>"
+                    f"<span style='color:#{'E6EDF3' if is_total else '8B949E'};font-weight:{weight}'>"
+                    f"{label}</span>"
+                    f"<span style='color:{clr2};font-weight:{weight}'>"
+                    f"{'$'+str(abs(val))+'  ' if val and val<0 else ('$'+str(val)+'/bbl' if val else '—')}"
+                    f"</span></div>"
+                )
+            wf_html += "</div>"
+            st.markdown(wf_html, unsafe_allow_html=True)
+            st.caption("Est. Net Margin uses benchmark opex · adjust in Cost Transparency panel")
+
+        with col_right:
+            # ── Stress test 2×2 ───────────────────────────────────────────────
+            st.markdown("<div class='sec-hdr'>Stress Test — 3-2-1 Crack Spread</div>",
+                        unsafe_allow_html=True)
+            crude_b = r.get("crude_light", cr_)
+            gas_b   = r.get("wholesale_gas",  ws_g)
+            die_b   = r.get("wholesale_diesel",ws_d)
+            base    = s321 or 0
+            scenarios = [
+                ("Crude +25%",    crude_b*1.25, gas_b,      die_b),
+                ("Products +25%", crude_b,      gas_b*1.25, die_b*1.25),
+                ("Crude −25%",    crude_b*0.75, gas_b,      die_b),
+                ("Products −25%", crude_b,      gas_b*0.75, die_b*0.75),
+            ]
+            r1c1,r1c2 = st.columns(2)
+            r2c1,r2c2 = st.columns(2)
+            for col,(lbl,c,g,d) in zip([r1c1,r1c2,r2c1,r2c2],scenarios):
+                val   = round(_c321(c,g,d),2)
+                delta = round(val-base,2)
+                is_up = delta >= 0
+                bg    = "#0D2A1A" if is_up else "#2A0D0D"
+                clr2  = "#3FB950" if is_up else "#F85149"
+                sign  = "▲" if is_up else "▼"
+                col.markdown(f"""
+                <div style='background:{bg};border-radius:8px;padding:12px;
+                     text-align:center;margin-bottom:6px'>
+                  <div style='font-size:9px;color:{clr2};letter-spacing:1px;
+                       text-transform:uppercase;font-weight:600'>{lbl}</div>
+                  <div style='font-size:10px;color:#8B949E;margin:2px 0'>
+                      Base: ${base:.2f}</div>
+                  <div style='font-size:22px;font-weight:700;
+                       font-family:monospace;color:{clr2}'>${val:.2f}</div>
+                  <div style='font-size:11px;color:{clr2}'>{sign} {sign_str(delta)}/bbl</div>
+                </div>""", unsafe_allow_html=True)
+
+            # ── Forward averages table ────────────────────────────────────────
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("<div class='sec-hdr'>Forward Economics — Period Averages</div>",
+                        unsafe_allow_html=True)
+            if fwd:
+                periods = [("3 Month",fwd["3mo"]),("6 Month",fwd["6mo"]),
+                           ("12 Month",fwd["12mo"]),("24 Month",fwd["24mo"])]
+                fwd_html = (
+                    "<table style='width:100%;border-collapse:collapse;"
+                    "font-size:11px;font-family:monospace'>"
+                    "<tr>"
+                    "<th style='color:#8B949E;font-weight:400;text-align:left;"
+                    "padding:4px 8px 4px 0'>Period</th>"
+                    "<th style='color:#8B949E;font-weight:400;text-align:right;"
+                    "padding:4px 4px'>3-2-1</th>"
+                    "<th style='color:#8B949E;font-weight:400;text-align:right;"
+                    "padding:4px 4px'>Full Yield</th>"
+                    "<th style='color:#8B949E;font-weight:400;text-align:right;"
+                    "padding:4px 4px'>Est. Net</th>"
+                    "<th style='color:#8B949E;font-weight:400;text-align:right;"
+                    "padding:4px 0'>GRM/mo</th>"
+                    "</tr>"
+                )
+                for period, p in periods:
+                    c321_v = f"${p['crack_321']:.2f}" if p.get("crack_321") else "—"
+                    cfull_v= f"${p['crack_full']:.2f}" if p.get("crack_full") else "—"
+                    net_v  = f"${p['net']:.2f}" if p.get("net") else "—"
+                    mm_v   = f"${p['grm_mm']:.1f}MM" if p.get("grm_mm") else "—"
+                    net_clr= spread_color(p.get("net"))
+                    fwd_html += (
+                        f"<tr style='border-top:1px solid #21262D'>"
+                        f"<td style='color:#E6EDF3;padding:5px 8px 5px 0'>{period}</td>"
+                        f"<td style='color:{spread_color(p.get('crack_321'))};text-align:right;"
+                        f"padding:5px 4px'>{c321_v}</td>"
+                        f"<td style='color:{spread_color(p.get('crack_full'))};text-align:right;"
+                        f"padding:5px 4px'>{cfull_v}</td>"
+                        f"<td style='color:{net_clr};text-align:right;"
+                        f"padding:5px 4px'>{net_v}</td>"
+                        f"<td style='color:#3FB950;text-align:right;"
+                        f"padding:5px 0'>{mm_v}</td>"
+                        f"</tr>"
+                    )
+                fwd_html += "</table>"
+                st.markdown(fwd_html, unsafe_allow_html=True)
+
+                # Sparkline — forward Full Yield GRM trend
+                months_all  = [row["month"] for row in fwd["monthly"] if row.get("crack_full")]
+                fullvals_all= [row["crack_full"] for row in fwd["monthly"] if row.get("crack_full")]
+                if fullvals_all:
+                    fig_spark = go.Figure()
+                    fig_spark.add_trace(go.Scatter(
+                        x=months_all, y=fullvals_all,
+                        mode="lines",
+                        line=dict(color=spread_color(fullvals_all[0]), width=2),
+                        fill="tozeroy",
+                        fillcolor="rgba(63,185,80,0.08)" if fullvals_all[0]>=25
+                                  else "rgba(232,160,32,0.08)",
+                    ))
+                    fig_spark.add_hline(y=15, line_dash="dot",
+                        line_color="#484F58", opacity=0.5)
+                    fig_spark.update_layout(
+                        paper_bgcolor="#0D1117", plot_bgcolor="#0D1117",
+                        margin=dict(l=0,r=0,t=4,b=0), height=80,
+                        showlegend=False,
+                        xaxis=dict(visible=False),
+                        yaxis=dict(visible=False))
+                    st.plotly_chart(fig_spark, use_container_width=True)
+                st.caption(
+                    f"Basis: config defaults"
+                    f"{' (may reflect dashboard overrides)' if st.session_state.get(f'_fwd_init_{n}') else ''}"
+                    f" · deductions ${fwd['deductions']:.2f}/bbl")
+            else:
+                st.info("Forward curve not available.")
+
+        st.markdown("---")
+
+    # Footer
+    st.markdown(
+        f"<div style='color:#484F58;font-size:10px;text-align:center;margin-top:4px'>"
+        f"Rogue Refinery Economics · Management Report · "
+        f"{datetime.now().strftime('%Y-%m-%d %H:%M')} UTC · "
+        f"GRM is gross margin before opex · Net margin uses benchmark estimates"
+        f"</div>",
+        unsafe_allow_html=True)
 
 
 
@@ -2029,10 +2468,18 @@ if __name__ == "__main__":
 #     ulsd = live_spot.get("ulsd_gal", 3.5) or 3.5
 #     wti  = live_spot.get("wti_bbl",  80)  or 80
 #     st.session_state.update({
-#         # Crude basis — auto-populated from config
-#         f"fwd_crude_basis_{n}": float(loc_cfg.get("light_diff",   0.0)),
-#         f"fwd_heavy_basis_{n}": float(loc_cfg.get("heavy_diff",   0.0)),
-#         f"fwd_light_pct_{n}":   80.0,   # % of slate = light crude (default 80%)
+#         # Crude basis — decomposed: quality diff + transport tariff from config
+#         f"fwd_light_qual_{n}":    float(loc_cfg.get("light_quality_diff",    loc_cfg.get("light_diff",0.0))),
+#         f"fwd_light_tariff_{n}":  float(loc_cfg.get("light_transport_tariff",2.50)),
+#         f"fwd_heavy_qual_{n}":    float(loc_cfg.get("heavy_quality_diff",    loc_cfg.get("heavy_diff",0.0))),
+#         f"fwd_heavy_tariff_{n}":  float(loc_cfg.get("heavy_transport_tariff",2.50)),
+#         f"fwd_light_pct_{n}":     80.0,   # % of slate = light crude (default 80%)
+#         # Cost transparency opex items ($/bbl) — for net margin display
+#         f"ct_opex_{n}":           4.00,
+#         f"ct_prod_transport_{n}": 0.50,
+#         f"ct_blendstock_{n}":     1.20,
+#         f"ct_rin_{n}":            0.80,
+#         f"ct_maintenance_{n}":    0.75,
 #         # Product basis vs NYMEX
 #         f"fwd_gas_basis_{n}":   float(loc_cfg.get("gas_diff",     0.0)),
 #         f"fwd_die_basis_{n}":   float(loc_cfg.get("diesel_diff",  0.0)),
@@ -2089,6 +2536,125 @@ if __name__ == "__main__":
 #         <span class="ticker-value" style="color:#3FB950">{"$"+str(round(grm,1))+"MM" if grm else "—"}</span>
 #         <span class="ticker-label">before opex</span></div>
 #     </div>""", unsafe_allow_html=True)
+
+
+# # ══════════════════════════════════════════════════════════════════════════════
+# # COST TRANSPARENCY PANEL
+# # ══════════════════════════════════════════════════════════════════════════════
+# def _render_cost_transparency(n, grm_bbl, tp, live_mode=True):
+#     """
+#     Investment committee cost transparency panel.
+#     Shows what IS and IS NOT included in GRM, with editable opex deductions
+#     and a live estimated net margin calculation.
+#     """
+#     with st.expander(
+#         "💼 Cost Transparency — What's in GRM vs What's Not (Investment Committee View)",
+#         expanded=False):
+
+#         st.markdown(
+#             "<div style='font-size:11px;color:#8B949E;margin-bottom:12px'>"
+#             "GRM is a <b>gross</b> margin — it does not include operating costs. "
+#             "The items below are common deductions to arrive at net margin. "
+#             "Adjust to your actual cost structure.</div>",
+#             unsafe_allow_html=True)
+
+#         col_in, col_out = st.columns(2)
+
+#         with col_in:
+#             st.markdown(
+#                 "<div style='background:#0D2A1A;border-radius:6px;padding:10px 14px;"
+#                 "margin-bottom:8px'>"
+#                 "<div style='font-size:10px;font-weight:600;color:#3FB950;"
+#                 "text-transform:uppercase;letter-spacing:1px;margin-bottom:8px'>"
+#                 "✅ INCLUDED IN GRM</div>",
+#                 unsafe_allow_html=True)
+#             included_items = [
+#                 ("Crude quality differential",   "Crude grade premium/discount vs WTI"),
+#                 ("Crude pipeline/marine tariff",  "Field to refinery gate transport"),
+#                 ("Federal & state fuel taxes",    "Stripped from AAA retail prices"),
+#                 ("Distribution margin",           "Terminal to pump ($0.35/gal default)"),
+#                 ("Refinery fuel & losses",        "~5.5% of barrel burned onsite"),
+#             ]
+#             for item, desc in included_items:
+#                 st.markdown(
+#                     f"<div style='margin-bottom:6px'>"
+#                     f"<span style='font-size:11px;color:#E6EDF3'>{item}</span><br>"
+#                     f"<span style='font-size:10px;color:#484F58'>{desc}</span>"
+#                     f"</div>",
+#                     unsafe_allow_html=True)
+#             st.markdown("</div>", unsafe_allow_html=True)
+
+#         with col_out:
+#             st.markdown(
+#                 "<div style='background:#2A0D0D;border-radius:6px;padding:10px 14px;"
+#                 "margin-bottom:8px'>"
+#                 "<div style='font-size:10px;font-weight:600;color:#F85149;"
+#                 "text-transform:uppercase;letter-spacing:1px;margin-bottom:8px'>"
+#                 "❌ NOT IN GRM — deduct for net margin</div>",
+#                 unsafe_allow_html=True)
+
+#             OPEX_ITEMS = [
+#                 (f"ct_opex_{n}",            "Refinery opex ($/bbl)",            4.00,
+#                  "Labor, utilities, catalysts, chemicals"),
+#                 (f"ct_prod_transport_{n}",   "Product transport ($/bbl)",         0.50,
+#                  "Pipeline/truck from refinery to terminal"),
+#                 (f"ct_blendstock_{n}",       "Blendstock costs ($/bbl)",          1.20,
+#                  "Ethanol, butane, MTBE, additives"),
+#                 (f"ct_rin_{n}",              "RIN obligations ($/bbl)",           0.80,
+#                  "Renewable fuel standard compliance"),
+#                 (f"ct_maintenance_{n}",      "Maintenance & turnaround ($/bbl)",  0.75,
+#                  "Annualized capex, scheduled downtime"),
+#             ]
+#             total_deductions = 0.0
+#             for key, label, default, desc in OPEX_ITEMS:
+#                 val = st.number_input(
+#                     label, min_value=0.0, max_value=20.0,
+#                     value=float(st.session_state.get(key, default)),
+#                     step=0.25, format="%.2f", key=f"ctp_{key}")
+#                 st.session_state[key] = val
+#                 total_deductions += val
+#                 st.caption(desc)
+#             st.markdown("</div>", unsafe_allow_html=True)
+
+#         net_margin = round((grm_bbl or 0) - total_deductions, 2) if grm_bbl else None
+#         net_grm_mm = round(net_margin * tp * 30 / 1e6, 2) if (net_margin and tp) else None
+#         net_clr    = ("#3FB950" if net_margin and net_margin >= 10
+#                       else ("#E8A020" if net_margin and net_margin >= 0
+#                       else "#F85149"))
+
+#         net_mm_html = (
+#             f"<div><div style='font-size:9px;color:#8B949E;text-transform:uppercase;"
+#             f"letter-spacing:1px'>Net GRM / Month</div>"
+#             f"<div style='font-size:22px;font-weight:700;font-family:monospace;"
+#             f"color:{net_clr}'>${net_grm_mm:.1f}MM</div></div>"
+#         ) if net_grm_mm else ""
+
+#         st.markdown(
+#             f"<div style='background:#161B22;border:1px solid #30363D;"
+#             f"border-radius:8px;padding:14px 18px;margin-top:8px'>"
+#             f"<div style='display:flex;gap:24px;align-items:center;flex-wrap:wrap'>"
+#             f"<div><div style='font-size:9px;color:#8B949E;text-transform:uppercase;"
+#             f"letter-spacing:1px'>Gross Refining Margin</div>"
+#             f"<div style='font-size:22px;font-weight:700;font-family:monospace;"
+#             f"color:#E8A020'>${(grm_bbl or 0):.2f}/bbl</div></div>"
+#             f"<div style='font-size:22px;color:#484F58'>−</div>"
+#             f"<div><div style='font-size:9px;color:#8B949E;text-transform:uppercase;"
+#             f"letter-spacing:1px'>Est. Total Deductions</div>"
+#             f"<div style='font-size:22px;font-weight:700;font-family:monospace;"
+#             f"color:#F85149'>${total_deductions:.2f}/bbl</div></div>"
+#             f"<div style='font-size:22px;color:#484F58'>=</div>"
+#             f"<div><div style='font-size:9px;color:#8B949E;text-transform:uppercase;"
+#             f"letter-spacing:1px'>Est. Net Margin</div>"
+#             f"<div style='font-size:22px;font-weight:700;font-family:monospace;"
+#             f"color:{net_clr}'>{'$'+str(net_margin)+'/bbl' if net_margin is not None else '—'}</div></div>"
+#             f"{net_mm_html}"
+#             f"</div>"
+#             f"<div style='font-size:10px;color:#484F58;margin-top:8px'>"
+#             f"⚠️ Estimated net margin uses industry benchmark defaults. "
+#             f"Adjust deduction items to your actual cost structure. "
+#             f"Not a substitute for detailed project-level financial modeling.</div>"
+#             f"</div>",
+#             unsafe_allow_html=True)
 
 
 # # ══════════════════════════════════════════════════════════════════════════════
@@ -2719,6 +3285,9 @@ if __name__ == "__main__":
 #                 margin=dict(l=0,r=0,t=36,b=0),height=320)
 #             st.plotly_chart(fig_bar, use_container_width=True)
 
+#         # ── Cost Transparency Panel ───────────────────────────────────────────
+#         _render_cost_transparency(n, r.get("spread_full"), tp, live_mode=True)
+
 #         # ── CSV download ───────────────────────────────────────────────────────
 #         st.markdown("---")
 #         dl_row = {
@@ -2790,9 +3359,11 @@ if __name__ == "__main__":
 #             ulsd2 = live_spot.get("ulsd_gal",3.5) or 3.5
 #             wti2  = live_spot.get("wti_bbl",80)   or 80
 #             st.session_state.update({
-#                 f"fwd_crude_basis_{n}": float(loc_cfg.get("light_diff",0)),
-#                 f"fwd_heavy_basis_{n}": float(loc_cfg.get("heavy_diff",0)),
-#                 f"fwd_light_pct_{n}":   80.0,
+#                 f"fwd_light_qual_{n}":   float(loc_cfg.get("light_quality_diff",    loc_cfg.get("light_diff",0))),
+#                 f"fwd_light_tariff_{n}": float(loc_cfg.get("light_transport_tariff",2.50)),
+#                 f"fwd_heavy_qual_{n}":   float(loc_cfg.get("heavy_quality_diff",    loc_cfg.get("heavy_diff",0))),
+#                 f"fwd_heavy_tariff_{n}": float(loc_cfg.get("heavy_transport_tariff",2.50)),
+#                 f"fwd_light_pct_{n}":    80.0,
 #                 f"fwd_gas_basis_{n}":   float(loc_cfg.get("gas_diff",0)),
 #                 f"fwd_die_basis_{n}":   float(loc_cfg.get("diesel_diff",0)),
 #                 f"fwd_jet_{n}":         spec2.get("jet_gal",   ulsd2*1.05),
@@ -2807,69 +3378,117 @@ if __name__ == "__main__":
 #             })
 #             st.rerun()
 
-#         # ── SECTION A: Crude basis + slate blending — red = INPUT COSTS ────────
+#         # ── SECTION A: Crude slate — fully decomposed cost inputs ───────────────
 #         st.markdown(
 #             "<div style='background:#2A0D0D;border-radius:6px;padding:6px 12px;"
 #             "margin-bottom:8px;font-size:10px;color:#F85149'>"
-#             "🔴 CRUDE SLATE & PRODUCT BASIS — location differential vs NYMEX + "
-#             "light/heavy blend determines blended crude cost per barrel"
+#             "🔴 CRUDE INLET COST — quality differential + pipeline/marine tariff "
+#             "= delivered cost at refinery gate · blended across light/heavy slate"
 #             "</div>",
 #             unsafe_allow_html=True)
 
-#         # Row 1: Crude basis inputs + slate split
-#         b1,b2,b3 = st.columns(3)
-#         crude_basis = b1.number_input(
-#             "Light Crude vs WTI ($/bbl)",
+#         # Row 1: Light crude decomposition
+#         la1,la2,la3 = st.columns(3)
+#         la1.markdown("<div style='font-size:9px;color:#8B949E;text-transform:uppercase;"
+#                      "letter-spacing:1px;margin-bottom:4px'>LIGHT CRUDE</div>",
+#                      unsafe_allow_html=True)
+#         light_qual = la1.number_input(
+#             "Quality diff vs WTI ($/bbl)",
 #             min_value=-20.0, max_value=20.0,
-#             value=float(st.session_state.get(f"fwd_crude_basis_{n}", loc_cfg.get("light_diff",0))),
-#             step=0.25, format="%.2f", key=f"fp_cb_{n}")
-#         st.session_state[f"fwd_crude_basis_{n}"] = crude_basis
-#         eff_light_spot = round(wti_spot + crude_basis, 2)
-#         b1.caption(f"Config: {loc_cfg.get('light_diff',0):+.2f} | Spot: ${eff_light_spot:.2f}/bbl")
+#             value=float(st.session_state.get(f"fwd_light_qual_{n}",
+#                         loc_cfg.get("light_quality_diff", loc_cfg.get("light_diff",0)))),
+#             step=0.25, format="%.2f", key=f"fp_lq_{n}")
+#         st.session_state[f"fwd_light_qual_{n}"] = light_qual
+#         la1.caption(f"Crude grade premium/discount vs WTI light sweet")
 
-#         heavy_basis = b2.number_input(
-#             "Heavy Crude vs WTI ($/bbl)",
-#             min_value=-20.0, max_value=20.0,
-#             value=float(st.session_state.get(f"fwd_heavy_basis_{n}", loc_cfg.get("heavy_diff",0))),
-#             step=0.25, format="%.2f", key=f"fp_hb_{n}")
-#         st.session_state[f"fwd_heavy_basis_{n}"] = heavy_basis
-#         eff_heavy_spot = round(wti_spot + heavy_basis, 2)
-#         b2.caption(f"Config: {loc_cfg.get('heavy_diff',0):+.2f} | Spot: ${eff_heavy_spot:.2f}/bbl")
+#         light_tariff = la2.number_input(
+#             "Pipeline/marine tariff ($/bbl)",
+#             min_value=0.0, max_value=20.0,
+#             value=float(st.session_state.get(f"fwd_light_tariff_{n}",
+#                         loc_cfg.get("light_transport_tariff", 2.50))),
+#             step=0.25, format="%.2f", key=f"fp_lt_{n}")
+#         st.session_state[f"fwd_light_tariff_{n}"] = light_tariff
+#         la2.caption(f"Field to refinery gate · default $2.50/bbl")
 
-#         light_pct = b3.number_input(
+#         light_pct = la3.number_input(
 #             "Light crude % of slate",
 #             min_value=0.0, max_value=100.0,
 #             value=float(st.session_state.get(f"fwd_light_pct_{n}", 80.0)),
 #             step=5.0, format="%.0f", key=f"fp_lp_{n}")
 #         st.session_state[f"fwd_light_pct_{n}"] = light_pct
 #         heavy_pct = 100.0 - light_pct
+#         light_total = round(light_qual + light_tariff, 2)
+#         eff_light_spot = round(wti_spot + light_total, 2)
+#         la3.caption(f"Heavy: {heavy_pct:.0f}% | Total light diff: {light_total:+.2f}/bbl")
 
-#         # Compute blended crude cost — this is what goes into the crack formula
+#         # Row 2: Heavy crude decomposition
+#         lb1,lb2,lb3 = st.columns(3)
+#         lb1.markdown("<div style='font-size:9px;color:#8B949E;text-transform:uppercase;"
+#                      "letter-spacing:1px;margin-bottom:4px'>HEAVY CRUDE</div>",
+#                      unsafe_allow_html=True)
+#         heavy_qual = lb1.number_input(
+#             "Quality diff vs WTI ($/bbl) ",
+#             min_value=-20.0, max_value=20.0,
+#             value=float(st.session_state.get(f"fwd_heavy_qual_{n}",
+#                         loc_cfg.get("heavy_quality_diff", loc_cfg.get("heavy_diff",0)))),
+#             step=0.25, format="%.2f", key=f"fp_hq_{n}")
+#         st.session_state[f"fwd_heavy_qual_{n}"] = heavy_qual
+#         lb1.caption(f"Heavy sour discount vs WTI")
+
+#         heavy_tariff = lb2.number_input(
+#             "Pipeline/marine tariff ($/bbl) ",
+#             min_value=0.0, max_value=20.0,
+#             value=float(st.session_state.get(f"fwd_heavy_tariff_{n}",
+#                         loc_cfg.get("heavy_transport_tariff", 2.50))),
+#             step=0.25, format="%.2f", key=f"fp_ht_{n}")
+#         st.session_state[f"fwd_heavy_tariff_{n}"] = heavy_tariff
+#         lb2.caption(f"Field to refinery gate · default $2.50/bbl")
+
+#         heavy_total = round(heavy_qual + heavy_tariff, 2)
+#         eff_heavy_spot = round(wti_spot + heavy_total, 2)
+#         lb3.markdown(
+#             f"<div style='padding-top:28px;font-size:11px;color:#8B949E'>"
+#             f"Eff. spot heavy: ${eff_heavy_spot:.2f}/bbl<br>"
+#             f"({heavy_pct:.0f}% of slate)</div>",
+#             unsafe_allow_html=True)
+
+#         # Blended crude cost — core output of slate math
 #         light_f = light_pct / 100.0
 #         heavy_f = heavy_pct / 100.0
-#         blended_crude_diff = round(light_f * crude_basis + heavy_f * heavy_basis, 4)
+#         blended_crude_diff = round(light_f * light_total + heavy_f * heavy_total, 4)
 #         blended_crude_spot = round(wti_spot + blended_crude_diff, 2)
-#         b3.caption(
-#             f"Heavy: {heavy_pct:.0f}% | "
-#             f"Blended crude: ${blended_crude_spot:.2f}/bbl")
 
-#         # Blended crude cost summary card
 #         st.markdown(
 #             f"<div style='background:#21262D;border:1px solid #F85149;"
-#             f"border-radius:6px;padding:8px 14px;margin-bottom:10px;"
-#             f"display:flex;gap:24px;align-items:center'>"
-#             f"<div><span style='font-size:9px;color:#8B949E;text-transform:uppercase;"
-#             f"letter-spacing:1px'>Blended Crude Cost (Forward)</span><br>"
-#             f"<span style='font-size:20px;font-weight:700;font-family:monospace;"
-#             f"color:#F85149'>${blended_crude_spot:.2f}/bbl</span></div>"
-#             f"<div style='font-size:11px;color:#8B949E'>"
-#             f"{light_pct:.0f}% light @ ${eff_light_spot:.2f} + "
-#             f"{heavy_pct:.0f}% heavy @ ${eff_heavy_spot:.2f}<br>"
-#             f"WTI {fmt_bbl(wti_spot)} + blended diff {blended_crude_diff:+.2f}/bbl"
+#             f"border-radius:6px;padding:10px 16px;margin:8px 0 12px 0'>"
+#             f"<div style='display:flex;gap:32px;align-items:flex-start'>"
+#             f"<div>"
+#             f"<div style='font-size:9px;color:#8B949E;text-transform:uppercase;"
+#             f"letter-spacing:1px'>Blended Delivered Crude Cost</div>"
+#             f"<div style='font-size:24px;font-weight:700;font-family:monospace;"
+#             f"color:#F85149'>${blended_crude_spot:.2f}/bbl</div>"
+#             f"</div>"
+#             f"<div style='font-size:11px;color:#8B949E;line-height:1.8'>"
+#             f"WTI spot: {fmt_bbl(wti_spot)}<br>"
+#             f"+ Blended diff: {blended_crude_diff:+.2f}/bbl<br>"
+#             f"= Delivered gate cost"
+#             f"</div>"
+#             f"<div style='font-size:11px;color:#8B949E;line-height:1.8'>"
+#             f"Light ({light_pct:.0f}%): quality {light_qual:+.2f} + tariff "
+#             f"+{light_tariff:.2f} = {light_total:+.2f}/bbl → ${eff_light_spot:.2f}/bbl<br>"
+#             f"Heavy ({heavy_pct:.0f}%): quality {heavy_qual:+.2f} + tariff "
+#             f"+{heavy_tariff:.2f} = {heavy_total:+.2f}/bbl → ${eff_heavy_spot:.2f}/bbl"
+#             f"</div>"
 #             f"</div></div>",
 #             unsafe_allow_html=True)
 
-#         # Row 2: Product basis
+#         # Product basis
+#         st.markdown(
+#             "<div style='background:#0D1A2A;border-radius:6px;padding:6px 12px;"
+#             "margin-bottom:8px;font-size:10px;color:#4A90D9'>"
+#             "🔵 PRODUCT MARKET BASIS — location differential vs NYMEX benchmark"
+#             "</div>",
+#             unsafe_allow_html=True)
 #         b4,b5 = st.columns(2)
 #         gas_basis = b4.number_input(
 #             "Gasoline vs RBOB ($/gal)",
@@ -2877,7 +3496,7 @@ if __name__ == "__main__":
 #             value=float(st.session_state.get(f"fwd_gas_basis_{n}", loc_cfg.get("gas_diff",0))),
 #             step=0.01, format="%.3f", key=f"fp_gb_{n}")
 #         st.session_state[f"fwd_gas_basis_{n}"] = gas_basis
-#         b4.caption(f"Config: {loc_cfg.get('gas_diff',0):+.3f} | Eff. spot: ${rbob_spot+gas_basis:.3f}/gal")
+#         b4.caption(f"Config: {loc_cfg.get('gas_diff',0):+.3f} | Eff. spot: ${rbob_spot+gas_basis:.3f}/gal | ${(rbob_spot+gas_basis)*42:.2f}/bbl")
 
 #         die_basis = b5.number_input(
 #             "Diesel vs ULSD ($/gal)",
@@ -2885,7 +3504,7 @@ if __name__ == "__main__":
 #             value=float(st.session_state.get(f"fwd_die_basis_{n}", loc_cfg.get("diesel_diff",0))),
 #             step=0.01, format="%.3f", key=f"fp_db_{n}")
 #         st.session_state[f"fwd_die_basis_{n}"] = die_basis
-#         b5.caption(f"Config: {loc_cfg.get('diesel_diff',0):+.3f} | Eff. spot: ${ulsd_spot+die_basis:.3f}/gal")
+#         b5.caption(f"Config: {loc_cfg.get('diesel_diff',0):+.3f} | Eff. spot: ${ulsd_spot+die_basis:.3f}/gal | ${(ulsd_spot+die_basis)*42:.2f}/bbl")
 
 #         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -3029,7 +3648,7 @@ if __name__ == "__main__":
 #             if wti_fwd:
 #                 strip_df = pd.DataFrame({
 #                     "Month":              months[:6],
-#                     "WTI+Basis ($/bbl)":  [f"${v+crude_basis:.2f}"  for v in wti_fwd[:6]],
+#                     "WTI+Blend ($/bbl)":  [f"${v+blended_crude_diff:.2f}"  for v in wti_fwd[:6]],
 #                     "RBOB+Basis ($/gal)": [f"${v+gas_basis:.3f}"    for v in rbob_f[:6]],
 #                     "ULSD+Basis ($/gal)": [f"${v+die_basis:.3f}"    for v in ulsd_f[:6]],
 #                     "Jet fwd ($/gal)":    [f"${eff_jet:.3f}"]    * 6,
@@ -3215,10 +3834,10 @@ if __name__ == "__main__":
 #             f_heavy_bbl = round(fwd_tp * heavy_f)
 #             fwd_ops_rows = [
 #                 ("Light Crude",  "🔴 INPUT (cost)",   f_light_bbl, f"{f_light_bbl*42:,.0f}",
-#                  f"{f_light_bbl*30:,.0f}", f"WTI+{crude_basis:+.2f} = ${eff_light_spot:.2f}/bbl",
+#                  f"{f_light_bbl*30:,.0f}", f"WTI+{light_total:+.2f} = ${eff_light_spot:.2f}/bbl",
 #                  f"{light_pct:.0f}% of slate"),
 #                 ("Heavy Crude",  "🔴 INPUT (cost)",   f_heavy_bbl, f"{f_heavy_bbl*42:,.0f}",
-#                  f"{f_heavy_bbl*30:,.0f}", f"WTI+{heavy_basis:+.2f} = ${eff_heavy_spot:.2f}/bbl",
+#                  f"{f_heavy_bbl*30:,.0f}", f"WTI+{heavy_total:+.2f} = ${eff_heavy_spot:.2f}/bbl",
 #                  f"{heavy_pct:.0f}% of slate"),
 #                 ("Blended Crude","🔴 TOTAL INPUT",    fwd_tp,      f"{fwd_tp*42:,.0f}",
 #                  f"{fwd_tp*30:,.0f}", f"Blended = ${blended_crude_spot:.2f}/bbl",
@@ -3393,3 +4012,4 @@ if __name__ == "__main__":
 
 # if __name__ == "__main__":
 #     main()
+
