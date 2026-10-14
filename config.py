@@ -65,6 +65,10 @@ LOCATIONS = [
         "catfeed_diff":   4.00,
         "gas_diff":       0.00,
         "diesel_diff":    0.00,
+        "light_quality_diff":     0.00,   # crude grade vs WTI (adjust per location)
+        "light_transport_tariff": 2.50,   # pipeline/marine to gate (default $2.50/bbl)
+        "heavy_quality_diff":    -3.00,   # heavy crude quality discount
+        "heavy_transport_tariff": 2.50,   # same tariff default
     },
     {
         "display":       "Greenport — Austin, TX",
@@ -75,6 +79,10 @@ LOCATIONS = [
         "catfeed_diff":   5.00,
         "gas_diff":       0.00,
         "diesel_diff":    0.00,
+        "light_quality_diff":     0.00,   # crude grade vs WTI (adjust per location)
+        "light_transport_tariff": 2.50,   # pipeline/marine to gate (default $2.50/bbl)
+        "heavy_quality_diff":    -3.00,   # heavy crude quality discount
+        "heavy_transport_tariff": 2.50,   # same tariff default
     },
     {
         "display":       "Victoria, TX",
@@ -85,6 +93,10 @@ LOCATIONS = [
         "catfeed_diff":   7.00,
         "gas_diff":       0.00,
         "diesel_diff":    0.00,
+        "light_quality_diff":     0.00,   # crude grade vs WTI (adjust per location)
+        "light_transport_tariff": 2.50,   # pipeline/marine to gate (default $2.50/bbl)
+        "heavy_quality_diff":    -3.00,   # heavy crude quality discount
+        "heavy_transport_tariff": 2.50,   # same tariff default
     },
     {
         "display":       "Duncan, OK",
@@ -95,6 +107,10 @@ LOCATIONS = [
         "catfeed_diff":   5.00,
         "gas_diff":       0.00,
         "diesel_diff":    0.00,
+        "light_quality_diff":     0.00,   # crude grade vs WTI (adjust per location)
+        "light_transport_tariff": 2.50,   # pipeline/marine to gate (default $2.50/bbl)
+        "heavy_quality_diff":    -3.00,   # heavy crude quality discount
+        "heavy_transport_tariff": 2.50,   # same tariff default
     },
     {
         "display":       "Dewey, OK",
@@ -105,6 +121,10 @@ LOCATIONS = [
         "catfeed_diff":   5.00,
         "gas_diff":       0.00,
         "diesel_diff":    0.00,
+        "light_quality_diff":     0.00,   # crude grade vs WTI (adjust per location)
+        "light_transport_tariff": 2.50,   # pipeline/marine to gate (default $2.50/bbl)
+        "heavy_quality_diff":    -3.00,   # heavy crude quality discount
+        "heavy_transport_tariff": 2.50,   # same tariff default
     },
     {
         "display":       "North Dakota — Stampede",
@@ -115,6 +135,10 @@ LOCATIONS = [
         "catfeed_diff":   5.00,
         "gas_diff":       0.00,
         "diesel_diff":    0.00,
+        "light_quality_diff":     0.00,   # crude grade vs WTI (adjust per location)
+        "light_transport_tariff": 2.50,   # pipeline/marine to gate (default $2.50/bbl)
+        "heavy_quality_diff":    -3.00,   # heavy crude quality discount
+        "heavy_transport_tariff": 2.50,   # same tariff default
     },
     {
         "display":       "Big Spring, TX",
@@ -125,6 +149,10 @@ LOCATIONS = [
         "catfeed_diff":   5.00,
         "gas_diff":       0.00,
         "diesel_diff":    0.00,
+        "light_quality_diff":     0.00,   # crude grade vs WTI (adjust per location)
+        "light_transport_tariff": 2.50,   # pipeline/marine to gate (default $2.50/bbl)
+        "heavy_quality_diff":    -3.00,   # heavy crude quality discount
+        "heavy_transport_tariff": 2.50,   # same tariff default
     },
     {
         "display":       "Utah",
@@ -135,6 +163,10 @@ LOCATIONS = [
         "catfeed_diff":   5.00,
         "gas_diff":       0.00,
         "diesel_diff":    0.00,
+        "light_quality_diff":     0.00,   # crude grade vs WTI (adjust per location)
+        "light_transport_tariff": 2.50,   # pipeline/marine to gate (default $2.50/bbl)
+        "heavy_quality_diff":    -3.00,   # heavy crude quality discount
+        "heavy_transport_tariff": 2.50,   # same tariff default
     },
     {
         "display":       "SE New Mexico",
@@ -145,6 +177,10 @@ LOCATIONS = [
         "catfeed_diff":   5.00,
         "gas_diff":       0.00,
         "diesel_diff":    0.00,
+        "light_quality_diff":     0.00,   # crude grade vs WTI (adjust per location)
+        "light_transport_tariff": 2.50,   # pipeline/marine to gate (default $2.50/bbl)
+        "heavy_quality_diff":    -3.00,   # heavy crude quality discount
+        "heavy_transport_tariff": 2.50,   # same tariff default
     },
     {
         "display":       "Louisiana",
@@ -155,6 +191,10 @@ LOCATIONS = [
         "catfeed_diff":   5.00,
         "gas_diff":       0.00,
         "diesel_diff":    0.00,
+        "light_quality_diff":     0.00,   # crude grade vs WTI (adjust per location)
+        "light_transport_tariff": 2.50,   # pipeline/marine to gate (default $2.50/bbl)
+        "heavy_quality_diff":    -3.00,   # heavy crude quality discount
+        "heavy_transport_tariff": 2.50,   # same tariff default
     },
     # {
     #     "display":       "Edmonton, Alberta",
@@ -179,6 +219,10 @@ LOCATIONS = [
         "diesel_diff":    0.00,
         "manual_gas":    4.80,
         "manual_diesel": 5.20,
+        "light_quality_diff":     0.00,   # crude grade vs WTI (adjust per location)
+        "light_transport_tariff": 2.50,   # pipeline/marine to gate (default $2.50/bbl)
+        "heavy_quality_diff":    -3.00,   # heavy crude quality discount
+        "heavy_transport_tariff": 2.50,   # same tariff default
     },
 ]
 
