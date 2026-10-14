@@ -1608,7 +1608,7 @@ def show_detail(live_margins, strip, sheet_prices, live_spot):
                  f"{f_light_bbl*30:,.0f}", f"WTI+{light_total:+.2f} = ${eff_light_spot:.2f}/bbl",
                  f"{light_pct:.0f}% of slate"),
                 ("Heavy Crude",  "🔴 INPUT (cost)",   f_heavy_bbl, f"{f_heavy_bbl*42:,.0f}",
-                 f"{f_heavy_bbl*30:,.0f}", f"WTI+{heavy_basis:+.2f} = ${eff_heavy_spot:.2f}/bbl",
+                 f"{f_heavy_bbl*30:,.0f}", f"WTI+{heavy_total:+.2f} = ${eff_heavy_spot:.2f}/bbl",
                  f"{heavy_pct:.0f}% of slate"),
                 ("Blended Crude","🔴 TOTAL INPUT",    fwd_tp,      f"{fwd_tp*42:,.0f}",
                  f"{fwd_tp*30:,.0f}", f"Blended = ${blended_crude_spot:.2f}/bbl",
