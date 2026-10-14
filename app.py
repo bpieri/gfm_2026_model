@@ -1665,6 +1665,8 @@ def main():
 if __name__ == "__main__":
     main()
 
+
+
 # # app.py — Rogue Refinery Economics v6
 # # Today tab: clean 3-panel layout, no clutter
 # # Forward tab: basis-driven inputs against CME curve
