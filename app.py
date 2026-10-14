@@ -1419,7 +1419,7 @@ def show_detail(live_margins, strip, sheet_prices, live_spot):
             if wti_fwd:
                 strip_df = pd.DataFrame({
                     "Month":              months[:6],
-                    "WTI+Basis ($/bbl)":  [f"${v+crude_basis:.2f}"  for v in wti_fwd[:6]],
+                    "WTI+Blend ($/bbl)":  [f"${v+blended_crude_diff:.2f}"  for v in wti_fwd[:6]],
                     "RBOB+Basis ($/gal)": [f"${v+gas_basis:.3f}"    for v in rbob_f[:6]],
                     "ULSD+Basis ($/gal)": [f"${v+die_basis:.3f}"    for v in ulsd_f[:6]],
                     "Jet fwd ($/gal)":    [f"${eff_jet:.3f}"]    * 6,
@@ -1605,7 +1605,7 @@ def show_detail(live_margins, strip, sheet_prices, live_spot):
             f_heavy_bbl = round(fwd_tp * heavy_f)
             fwd_ops_rows = [
                 ("Light Crude",  "🔴 INPUT (cost)",   f_light_bbl, f"{f_light_bbl*42:,.0f}",
-                 f"{f_light_bbl*30:,.0f}", f"WTI+{crude_basis:+.2f} = ${eff_light_spot:.2f}/bbl",
+                 f"{f_light_bbl*30:,.0f}", f"WTI+{light_total:+.2f} = ${eff_light_spot:.2f}/bbl",
                  f"{light_pct:.0f}% of slate"),
                 ("Heavy Crude",  "🔴 INPUT (cost)",   f_heavy_bbl, f"{f_heavy_bbl*42:,.0f}",
                  f"{f_heavy_bbl*30:,.0f}", f"WTI+{heavy_basis:+.2f} = ${eff_heavy_spot:.2f}/bbl",
@@ -1783,6 +1783,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
 
 
 
