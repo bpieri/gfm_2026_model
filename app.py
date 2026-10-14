@@ -310,6 +310,125 @@ def render_ticker(live_spot, live_margins):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# COST TRANSPARENCY PANEL
+# ══════════════════════════════════════════════════════════════════════════════
+def _render_cost_transparency(n, grm_bbl, tp, live_mode=True):
+    """
+    Investment committee cost transparency panel.
+    Shows what IS and IS NOT included in GRM, with editable opex deductions
+    and a live estimated net margin calculation.
+    """
+    with st.expander(
+        "💼 Cost Transparency — What's in GRM vs What's Not (Investment Committee View)",
+        expanded=False):
+
+        st.markdown(
+            "<div style='font-size:11px;color:#8B949E;margin-bottom:12px'>"
+            "GRM is a <b>gross</b> margin — it does not include operating costs. "
+            "The items below are common deductions to arrive at net margin. "
+            "Adjust to your actual cost structure.</div>",
+            unsafe_allow_html=True)
+
+        col_in, col_out = st.columns(2)
+
+        with col_in:
+            st.markdown(
+                "<div style='background:#0D2A1A;border-radius:6px;padding:10px 14px;"
+                "margin-bottom:8px'>"
+                "<div style='font-size:10px;font-weight:600;color:#3FB950;"
+                "text-transform:uppercase;letter-spacing:1px;margin-bottom:8px'>"
+                "✅ INCLUDED IN GRM</div>",
+                unsafe_allow_html=True)
+            included_items = [
+                ("Crude quality differential",   "Crude grade premium/discount vs WTI"),
+                ("Crude pipeline/marine tariff",  "Field to refinery gate transport"),
+                ("Federal & state fuel taxes",    "Stripped from AAA retail prices"),
+                ("Distribution margin",           "Terminal to pump ($0.35/gal default)"),
+                ("Refinery fuel & losses",        "~5.5% of barrel burned onsite"),
+            ]
+            for item, desc in included_items:
+                st.markdown(
+                    f"<div style='margin-bottom:6px'>"
+                    f"<span style='font-size:11px;color:#E6EDF3'>{item}</span><br>"
+                    f"<span style='font-size:10px;color:#484F58'>{desc}</span>"
+                    f"</div>",
+                    unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        with col_out:
+            st.markdown(
+                "<div style='background:#2A0D0D;border-radius:6px;padding:10px 14px;"
+                "margin-bottom:8px'>"
+                "<div style='font-size:10px;font-weight:600;color:#F85149;"
+                "text-transform:uppercase;letter-spacing:1px;margin-bottom:8px'>"
+                "❌ NOT IN GRM — deduct for net margin</div>",
+                unsafe_allow_html=True)
+
+            OPEX_ITEMS = [
+                (f"ct_opex_{n}",            "Refinery opex ($/bbl)",            4.00,
+                 "Labor, utilities, catalysts, chemicals"),
+                (f"ct_prod_transport_{n}",   "Product transport ($/bbl)",         0.50,
+                 "Pipeline/truck from refinery to terminal"),
+                (f"ct_blendstock_{n}",       "Blendstock costs ($/bbl)",          1.20,
+                 "Ethanol, butane, MTBE, additives"),
+                (f"ct_rin_{n}",              "RIN obligations ($/bbl)",           0.80,
+                 "Renewable fuel standard compliance"),
+                (f"ct_maintenance_{n}",      "Maintenance & turnaround ($/bbl)",  0.75,
+                 "Annualized capex, scheduled downtime"),
+            ]
+            total_deductions = 0.0
+            for key, label, default, desc in OPEX_ITEMS:
+                val = st.number_input(
+                    label, min_value=0.0, max_value=20.0,
+                    value=float(st.session_state.get(key, default)),
+                    step=0.25, format="%.2f", key=f"ctp_{key}")
+                st.session_state[key] = val
+                total_deductions += val
+                st.caption(desc)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        net_margin = round((grm_bbl or 0) - total_deductions, 2) if grm_bbl else None
+        net_grm_mm = round(net_margin * tp * 30 / 1e6, 2) if (net_margin and tp) else None
+        net_clr    = ("#3FB950" if net_margin and net_margin >= 10
+                      else ("#E8A020" if net_margin and net_margin >= 0
+                      else "#F85149"))
+
+        net_mm_html = (
+            f"<div><div style='font-size:9px;color:#8B949E;text-transform:uppercase;"
+            f"letter-spacing:1px'>Net GRM / Month</div>"
+            f"<div style='font-size:22px;font-weight:700;font-family:monospace;"
+            f"color:{net_clr}'>${net_grm_mm:.1f}MM</div></div>"
+        ) if net_grm_mm else ""
+
+        st.markdown(
+            f"<div style='background:#161B22;border:1px solid #30363D;"
+            f"border-radius:8px;padding:14px 18px;margin-top:8px'>"
+            f"<div style='display:flex;gap:24px;align-items:center;flex-wrap:wrap'>"
+            f"<div><div style='font-size:9px;color:#8B949E;text-transform:uppercase;"
+            f"letter-spacing:1px'>Gross Refining Margin</div>"
+            f"<div style='font-size:22px;font-weight:700;font-family:monospace;"
+            f"color:#E8A020'>${(grm_bbl or 0):.2f}/bbl</div></div>"
+            f"<div style='font-size:22px;color:#484F58'>−</div>"
+            f"<div><div style='font-size:9px;color:#8B949E;text-transform:uppercase;"
+            f"letter-spacing:1px'>Est. Total Deductions</div>"
+            f"<div style='font-size:22px;font-weight:700;font-family:monospace;"
+            f"color:#F85149'>${total_deductions:.2f}/bbl</div></div>"
+            f"<div style='font-size:22px;color:#484F58'>=</div>"
+            f"<div><div style='font-size:9px;color:#8B949E;text-transform:uppercase;"
+            f"letter-spacing:1px'>Est. Net Margin</div>"
+            f"<div style='font-size:22px;font-weight:700;font-family:monospace;"
+            f"color:{net_clr}'>{'$'+str(net_margin)+'/bbl' if net_margin is not None else '—'}</div></div>"
+            f"{net_mm_html}"
+            f"</div>"
+            f"<div style='font-size:10px;color:#484F58;margin-top:8px'>"
+            f"⚠️ Estimated net margin uses industry benchmark defaults. "
+            f"Adjust deduction items to your actual cost structure. "
+            f"Not a substitute for detailed project-level financial modeling.</div>"
+            f"</div>",
+            unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # PORTFOLIO PAGE
 # ══════════════════════════════════════════════════════════════════════════════
 LOC_COORDS = {
